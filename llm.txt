@@ -1,0 +1,220 @@
+# @opencode-ai/agent-squad - LLM Context
+
+## Project Overview
+
+A production-ready multi-agent team collaboration plugin for OpenCode that spawns real subagents using the OpenCode SDK.
+
+## Key Architecture Decisions
+
+### 1. Real Session Spawning
+
+Unlike mock implementations, this plugin creates actual OpenCode sessions:
+
+```typescript
+async function spawnAgentSession(agentName: string, task: string) {
+  // 1. Create real OpenCode session
+  const sessionResponse = await globalClient.session.create({});
+  const sessionID = sessionResponse.data.id;
+
+  // 2. Send prompt to agent
+  await globalClient.session.prompt({
+    path: { id: sessionID },
+    body: { parts: [{ type: "text", text: task }], agent: agentName }
+  });
+
+  return { sessionID };
+}
+```
+
+### 2. Parallel Execution with Error Isolation
+
+Uses `Promise.allSettled()` to ensure one agent failure doesn't affect others:
+
+```typescript
+const results = await Promise.allSettled(
+  team.agents.map(agent => executeAgent(agent, task))
+);
+```
+
+### 3. Dependency Graph with Cycle Detection
+
+Tasks have `blockedBy` and `blocks` arrays. Cycle detection prevents deadlocks:
+
+```typescript
+function detectCyclicDependency(team: Team, taskId: string, visited: Set<string>): boolean {
+  if (visited.has(taskId)) return true;  // Cycle detected
+  visited.add(taskId);
+
+  const task = team.tasks.get(taskId);
+  for (const depId of task.blockedBy) {
+    if (detectCyclicDependency(team, depId, visited)) return true;
+  }
+
+  visited.delete(taskId);  // Backtrack
+  return false;
+}
+```
+
+### 4. Devil's Advocate Pattern
+
+Every team preset includes `devil-s-advocate` with a forced critical thinking prompt:
+
+```typescript
+const DEVILS_ADVOCATE_PROMPT = `
+당신은 Devil's Advocate입니다. **모든 분석에 대해 반드시 비판적 관점을 제시해야 합니다.**
+
+## 의무 사항
+1. 잠재적 위험 지적
+2. 대안 제시
+3. 검증되지 않은 가정 식별
+4. 엣지 케이스 발견
+`;
+```
+
+## Type Definitions
+
+```typescript
+type AgentStatus = "idle" | "thinking" | "responding" | "completed" | "error";
+type TaskStatus = "pending" | "in_progress" | "completed" | "blocked" | "error";
+
+interface Agent {
+  name: string;
+  sessionID: string | null;
+  role: string;
+  status: AgentStatus;
+  result?: string;
+  error?: string;
+}
+
+interface Task {
+  id: string;
+  subject: string;
+  description: string;
+  status: TaskStatus;
+  owner?: string;
+  blockedBy: string[];
+  blocks: string[];
+  result?: string;
+  error?: string;
+  createdAt: Date;
+  completedAt?: Date;
+}
+
+interface Team {
+  id: string;
+  name: string;
+  preset: string;
+  agents: Map<string, Agent>;
+  tasks: Map<string, Task>;
+  createdAt: Date;
+  task: string;
+  results?: Map<string, string>;
+}
+```
+
+## Tools Reference
+
+### team-spawn
+```
+Args: { preset?: string, teamName: string, task: string }
+- preset: "review" | "security" | "debug" | "planning" | "implementation" | "fullstack" | "research" | "ai"
+  OR comma-separated agent names
+- Returns: Team ID, agents list, task description
+```
+
+### team-execute
+```
+Args: { teamId: string, timeout?: number }
+- Executes all agents in parallel
+- Returns: Formatted results from each agent
+```
+
+### team-discuss
+```
+Args: { teamId: string, topic: string, rounds?: number }
+- Sequential execution with context sharing
+- Max 3 rounds
+```
+
+### team-auto
+```
+Args: { request: string }
+- Auto-detects preset from keywords
+- Creates team and executes in one command
+```
+
+### task-create
+```
+Args: { teamId: string, subject: string, description: string, owner?: string, blockedBy?: string }
+- Creates task with optional dependencies
+```
+
+### task-update
+```
+Args: { teamId: string, taskId: string, status?, owner?, addBlockedBy?, addBlocks? }
+- Updates task properties and dependencies
+```
+
+### task-execute
+```
+Args: { teamId: string, timeout?: number }
+- Executes tasks respecting dependencies
+- Detects cycles before execution
+```
+
+## Preset Keywords
+
+| Preset | Keywords |
+|--------|----------|
+| security | 보안, security, 취약점, vulnerability |
+| debug | 버그, debug, 에러, error |
+| planning | 계획, planning, 설계, design |
+| implementation | 구현, implement, 개발, develop |
+| research | 조사, research, 탐색, explore |
+| review | (default) |
+
+## Error Handling
+
+1. **Session Timeout**: 90s default, configurable
+2. **Consecutive Errors**: 5 consecutive errors → abort
+3. **Cycle Detection**: Pre-execution cycle check
+4. **Max Iterations**: `tasks.size * 2` limit prevents infinite loops
+
+## Persistence
+
+Teams are saved to `~/.opencode/teams/{teamId}.json`:
+
+```json
+{
+  "id": "team-xxx",
+  "name": "my-team",
+  "preset": "review",
+  "task": "...",
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "agents": [...],
+  "tasks": [...]
+}
+```
+
+## Constants
+
+```typescript
+const MAX_TEAMS = 50;
+const MAX_TASKS = 200;
+const DEFAULT_TIMEOUT_MS = 90000;
+const POLL_INTERVAL_MS = 1500;
+const MAX_RESULT_LENGTH = 2000;
+```
+
+## Known Limitations
+
+1. **No Inter-Agent Messaging**: Message interface defined but not used in execution
+2. **Polling-Based**: Uses polling instead of SSE for completion detection
+3. **Single Instance**: Module-level global state prevents multi-instance
+
+## Future Enhancements
+
+- [ ] SSE-based completion detection
+- [ ] Real-time inter-agent messaging
+- [ ] Plan approval/rejection system
+- [ ] AbortController support

@@ -1,0 +1,48 @@
+{
+  "name": "@opencode-ai/agent-squad",
+  "version": "1.0.0",
+  "description": "Multi-agent team collaboration plugin for OpenCode",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "dev": "tsc --watch",
+    "test": "bun test",
+    "test:unit": "bun test test/unit.test.ts",
+    "test:integration": "bun test test/integration.test.ts",
+    "test:all": "bun test test/**/*.test.ts"
+  },
+  "keywords": [
+    "opencode",
+    "ai",
+    "agent",
+    "team",
+    "collaboration"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Burgunthy/opencode-agent-squad.git"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0",
+    "@opencode-ai/sdk": ">=1.0.0"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.1.60",
+    "@opencode-ai/sdk": "^1.1.60",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "@types/bun": "latest"
+  }
+}

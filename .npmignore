@@ -1,0 +1,15 @@
+src/
+test/
+*.test.ts
+*.sh
+tsconfig.json
+*.lock
+node_modules/
+test-results/
+coverage/
+.gitignore
+.npmignore
+llm.txt
+test-manual.ts
+test-cat3-4.js
+test-cat3-4-simple.sh
