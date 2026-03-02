@@ -2345,7 +2345,196 @@ const plugin = async (input) => {
             "agent-handoff": agentHandoffTool,
             "conflict-resolve": conflictResolveTool,
             "da-critique": daCritiqueTool,
+            // V2: 간소화된 올인원 도구
+            "squad": squadTool,
         },
     };
 };
+// ============================================================================
+// V2: SIMPLIFIED ALL-IN-ONE TOOL (간소화된 올인원 도구)
+// ============================================================================
+/**
+ * squad - 단일 명령으로 모든 것을 처리
+ *
+ * 개선 사항:
+ * 1. 자동 에이전트 선택 (API 호출 최소화)
+ * 2. 캐싱 (5분 TTL)
+ * 3. 재시도 (최대 2회)
+ * 4. 간소화된 출력
+ */
+const squadCache = new Map();
+const SQUAD_CACHE_TTL = 5 * 60 * 1000; // 5분
+const squadTool = tool({
+    description: `🚀 [V2 간소화] 한 번의 명령으로 팀을 생성하고 실행하여 결과를 얻습니다.
+
+**개선된 점:**
+- 자동으로 최적의 에이전트 선택 (2-3명)
+- 캐싱 지원 (동일한 요청은 5분간 재사용)
+- 자동 재시도 (실패 시 최대 2회)
+- 간소화된 출력
+
+**사용 예시:**
+- /squad task="이 코드의 보안 취약점을 분석해줘"
+- /squad task="버그 수정 도와줘" mode="fast"
+- /squad task="새 기능 구현 계획 세워줘" mode="thorough"
+
+**모드:**
+- fast (기본): 2명 에이전트, 빠른 응답
+- thorough: 3명 에이전트, 깊이 있는 분석
+- review: 3명+보안, 종합 코드 리뷰`,
+    args: {
+        task: z.string().describe("수행할 작업 (한국어 가능)"),
+        mode: z.enum(["fast", "thorough", "review"]).optional().default("fast")
+            .describe("fast: 2명(빠름), thorough: 3명(깊이), review: 3명+보안(종합)"),
+        useCache: z.boolean().optional().default(true).describe("캐시 사용 여부 (기본: true)"),
+    },
+    execute: async (params) => {
+        const task = params.task;
+        const mode = params.mode || "fast";
+        const useCache = params.useCache !== false;
+        // 캐시 키 생성
+        const cacheKey = `${mode}:${task.slice(0, 100)}`;
+        // 캐시 확인
+        if (useCache) {
+            const cached = squadCache.get(cacheKey);
+            if (cached && Date.now() - cached.timestamp < SQUAD_CACHE_TTL) {
+                return `📦 [캐시된 결과 - 5분 내 동일 요청]\n\n${cached.result}`;
+            }
+        }
+        // 작업 분석하여 최적 에이전트 선택
+        const taskLower = task.toLowerCase();
+        let agents;
+        let reason;
+        if (/보안|security|취약점|vulnerability|인증|auth|토큰|token|암호/i.test(task)) {
+            agents = mode === "review"
+                ? ["security-auditor", "code-reviewer", "devil-s-advocate"]
+                : ["security-auditor", "devil-s-advocate"];
+            reason = "🔒 보안 작업 감지";
+        }
+        else if (/버그|bug|에러|error|디버그|debug|수정|fix/i.test(task)) {
+            agents = mode === "review"
+                ? ["debugger", "code-reviewer", "devil-s-advocate"]
+                : ["debugger", "devil-s-advocate"];
+            reason = "🐛 디버그 작업 감지";
+        }
+        else if (/구현|implement|개발|develop|만들|create|추가|add|기능/i.test(task)) {
+            agents = mode === "fast"
+                ? ["planner", "devil-s-advocate"]
+                : ["planner", "fullstack-developer", "devil-s-advocate"];
+            reason = "🛠️ 구현 작업 감지";
+        }
+        else if (/계획|plan|설계|design|아키텍처|architecture/i.test(task)) {
+            agents = ["planner", "devil-s-advocate"];
+            reason = "📋 계획 작업 감지";
+        }
+        else if (/리뷰|review|검토|check|분석|analyze/i.test(task)) {
+            agents = mode === "fast"
+                ? ["code-reviewer", "devil-s-advocate"]
+                : ["code-reviewer", "security-auditor", "devil-s-advocate"];
+            reason = "🔍 리뷰 작업 감지";
+        }
+        else {
+            // 기본: 리뷰
+            agents = mode === "thorough"
+                ? ["code-reviewer", "security-auditor", "devil-s-advocate"]
+                : ["code-reviewer", "devil-s-advocate"];
+            reason = "📝 일반 작업 (기본 리뷰 모드)";
+        }
+        // 팀 생성
+        const teamId = `team-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const team = {
+            id: teamId,
+            name: `squad-${mode}`,
+            preset: "custom",
+            agents: new Map(),
+            tasks: new Map(),
+            createdAt: new Date(),
+            task,
+        };
+        // 에이전트 추가
+        for (const agentName of agents) {
+            team.agents.set(agentName, {
+                name: agentName,
+                sessionID: null,
+                role: agentName,
+                status: "idle",
+            });
+        }
+        teams.set(teamId, team);
+        saveTeam(team);
+        // 병렬 실행 (재시도 포함)
+        const results = [];
+        const taskPrompt = `${task}\n\n## 출력 가이드\n- 한국어로 답변\n- 핵심만 간결하게 (불필요한 서문 제외)\n- 실용적인 제안 위주`;
+        for (const agentName of agents) {
+            let retries = 0;
+            let success = false;
+            let result;
+            let error;
+            while (!success && retries <= 2) {
+                try {
+                    const sessionResult = await spawnAgentSession(agentName, taskPrompt, teamId);
+                    if (sessionResult) {
+                        // 결과 수집
+                        const messages = await globalClient.session.messages({
+                            path: { id: sessionResult.sessionID }
+                        });
+                        if (messages.data) {
+                            const assistantMessages = messages.data.filter(m => m.info.role === "assistant");
+                            if (assistantMessages.length > 0) {
+                                const lastMessage = assistantMessages[assistantMessages.length - 1];
+                                const textParts = (lastMessage.parts ?? []).filter((p) => "text" in p && typeof p.text === "string");
+                                result = textParts.map(p => p.text).join("\n");
+                                success = true;
+                            }
+                        }
+                    }
+                }
+                catch (e) {
+                    error = e instanceof Error ? e.message : String(e);
+                    retries++;
+                    if (retries <= 2) {
+                        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+                    }
+                }
+            }
+            results.push({ name: agentName, success, result, error });
+        }
+        // 결과 포맷팅
+        let output = `🚀 **Squad 실행 완료** (${mode} 모드)\n`;
+        output += `📊 ${reason}\n`;
+        output += `👥 에이전트: ${agents.join(", ")}\n\n`;
+        output += `---\n\n`;
+        for (const r of results) {
+            if (r.success && r.result) {
+                output += `### 🤖 ${r.name}\n\n`;
+                output += truncateText(r.result, 1500);
+                output += `\n\n`;
+            }
+            else if (r.error) {
+                output += `### ⚠️ ${r.name}\n\n`;
+                output += `**오류**: ${r.error}\n\n`;
+            }
+        }
+        // 종합
+        const successCount = results.filter(r => r.success).length;
+        output += `---\n`;
+        output += `📊 **결과**: ${successCount}/${results.length} 에이전트 성공\n`;
+        if (successCount === results.length) {
+            output += `✅ 모든 에이전트가 성공적으로 완료했습니다.\n`;
+        }
+        else if (successCount > 0) {
+            output += `⚠️ 일부 에이전트가 실패했습니다. 결과를 참고하세요.\n`;
+        }
+        else {
+            output += `❌ 모든 에이전트가 실패했습니다. 요청을 다시 시도해주세요.\n`;
+        }
+        // 캐시 저장
+        if (useCache && successCount > 0) {
+            squadCache.set(cacheKey, { result: output, timestamp: Date.now() });
+        }
+        // 정리
+        teams.delete(teamId);
+        return output;
+    },
+});
 export default plugin;

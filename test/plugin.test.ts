@@ -34,7 +34,7 @@ describe("opencode-agent-squad plugin", () => {
     const { default: plugin } = await import(distFile);
     const result = await plugin({ client: {} as any });
     expect(result).toHaveProperty("tool");
-    expect(Object.keys(result.tool).length).toBe(26);
+    expect(Object.keys(result.tool).length).toBe(27);
   });
 
   test("all required tools are present", async () => {
