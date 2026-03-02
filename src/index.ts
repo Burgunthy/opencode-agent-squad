@@ -2998,20 +2998,22 @@ const squadTool = tool({
 - /squad task="이 코드의 보안 취약점을 분석해줘"
 - /squad task="버그 수정 도와줘" mode="fast"
 - /squad task="새 기능 구현 계획 세워줘" mode="thorough"
+- /squad task="혁신적인 아이디어 브레인스토밍" mode="creative"
 
 **모드:**
 - fast (기본): 2명 에이전트, 빠른 응답
 - thorough: 3명 에이전트, 깊이 있는 분석
-- review: 3명+보안, 종합 코드 리뷰`,
+- review: 3명+보안, 종합 코드 리뷰
+- creative: 5명+DA, 창의적 개발 팀 (혁신/브레인스토밍)`,
   args: {
-    task: z.string().describe("수행할 작업 (한국어 가능)"),
-    mode: z.enum(["fast", "thorough", "review"]).optional().default("fast")
-      .describe("fast: 2명(빠름), thorough: 3명(깊이), review: 3명+보안(종합)"),
+    task: z.string().describe("수행할 작업"),
+    mode: z.enum(["fast", "thorough", "review", "creative"]).optional().default("fast")
+      .describe("fast: 2명, thorough: 3명, review: 3명+보안, creative: 5명+DA"),
     useCache: z.boolean().optional().default(true).describe("캐시 사용 여부 (기본: true)"),
   },
   execute: async (params) => {
     const task = params.task as string;
-    const mode = (params.mode as "fast" | "thorough" | "review") || "fast";
+    const mode = (params.mode as "fast" | "thorough" | "review" | "creative") || "fast";
     const useCache = params.useCache !== false;
 
     // 캐시 키 생성
@@ -3030,7 +3032,18 @@ const squadTool = tool({
     let agents: string[];
     let reason: string;
 
-    if (/보안|security|취약점|vulnerability|인증|auth|토큰|token|암호/i.test(task)) {
+    // Creative 모드: 큰 팀 (창의적 + 개발 + Devil's Advocate)
+    if (mode === "creative") {
+      agents = [
+        "planner",              // 계획 및 설계
+        "fullstack-developer",  // 풀스택 개발
+        "frontend-developer",   // 프론트엔드 전문
+        "backend-developer",    // 백엔드 전문
+        "ui-designer",          // UI/UX 디자인
+        "devil-s-advocate",     // 비판적 검토
+      ];
+      reason = "🎨 Creative 모드: 6명 대형 팀 (계획+개발+디자인+DA)";
+    } else if (/보안|security|취약점|vulnerability|인증|auth|토큰|token|암호/i.test(task)) {
       agents = mode === "review"
         ? ["security-auditor", "code-reviewer", "devil-s-advocate"]
         : ["security-auditor", "devil-s-advocate"];
