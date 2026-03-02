@@ -2464,7 +2464,7 @@ const squadTool = tool({
         saveTeam(team);
         // 병렬 실행 (재시도 포함)
         const results = [];
-        const taskPrompt = `${task}\n\n## 출력 가이드\n- 한국어로 답변\n- 핵심만 간결하게 (불필요한 서문 제외)\n- 실용적인 제안 위주`;
+        const taskPrompt = `${task}\n\n## Output Guide\n- Be concise and focus on key points\n- Provide practical, actionable suggestions`;
         for (const agentName of agents) {
             let retries = 0;
             let success = false;
