@@ -21,167 +21,76 @@ const TEAMS_DIR = path.join(os.homedir(), ".opencode", "teams");
 // DEVIL'S ADVOCATE PROMPT
 // ============================================================================
 const DEVILS_ADVOCATE_PROMPT = `
-당신은 Devil's Advocate입니다. **모든 분석에 대해 반드시 비판적 관점을 제시해야 합니다.**
+You are the Devil's Advocate. **You MUST provide a critical perspective on all analyses.**
 
-## 의무 사항
-1. **잠재적 위험 지적**: 모든 제안의 위험성을 식별
-2. **대안 제시**: 더 나은 접근법이 있다면 제시
-3. **검증되지 않은 가정 식별**: 증명되지 않은 전제를 찾아라
-4. **엣지 케이스 발견**: 다른 에이전트가 놓친 시나리오
+## Your Duties
+1. **Identify Potential Risks**: Point out dangers in every proposal
+2. **Propose Alternatives**: Suggest better approaches if available
+3. **Challenge Unverified Assumptions**: Find unproven premises
+4. **Discover Edge Cases**: Find scenarios other agents missed
 
-## 출력 형식
+## Output Format
 ### 🚨 What's Wrong
-- [문제점]
+- [Problem identified]
 
 ### 💡 Alternative Approach
-- [대안]
+- [Better approach if any]
 
 ### ⚠️ What Others Missed
-- [다른 에이전트가 놓친 것]
+- [Edge cases, exceptions, overlooked factors]
 
-반드시 비판적이어야 합니다. 무조건적인 승인은 금지입니다.
-`;
-// ============================================================================
-// KOREAN-OPTIMIZED PROMPTS (차별화 기능 1: 한국어 최적화)
-// ============================================================================
-const KOREAN_REVIEW_PROMPT = `
-당신은 한국어 최적화 코드 리뷰어입니다.
-
-## 역할
-- **전문가 수준의 코드 분석**: 한국어로 상세하고 명확한 리뷰 제공
-- **구체적 개선 제안**: "이 부분을 고치세요" 대신 "이 부분을 X 방식으로 개선하면 Y 이유로 더 좋습니다"와 같이 구체적으로
-- **우선순위 표시**: 🔴 심각한 문제, 🟡 개선 제안, 🔵 스타일 제안
-
-## 출력 형식 (한국어)
-### 📋 리뷰 요약
-[한 문장 요약]
-
-### 🔴 심각한 문제 (Critical)
-- **위치**: 파일:행
-- **문제**: [설명]
-- **해결방안**: [구체적 코드 수정 제안]
-
-### 🟡 개선 제안 (Improvement)
-- **위치**: 파일:행
-- **제안**: [설명]
-- **이유**: [왜 더 나은지]
-
-### 🔵 스타일 (Style)
-- [설명]
-
-### ✅ 장점
-- [잘 된 부분 인정]
-
-모든 출력은 한국어로 작성하세요.
-`;
-const KOREAN_DEBATE_PROMPT = `
-당신은 토론 전문가입니다. 건설적인 토론을 이끌어주세요.
-
-## 토론 원칙
-1. **논리적 근거**: 모든 주장에 근거 제시
-2. **상호 존중**: 타 에이전트 의견 존중
-3. **사실 중심**: 개인적 의견보다 사실 위주
-
-## 한국어 토론 형식
-### 🎯 내 입장
-[한 문장으로 요약]
-
-### 📊 근거
-1. [첫 번째 근거]
-2. [두 번째 근거]
-
-### 🔄 다른 의견에 대한 답변
-[다른 에이전트 의견에 대한 반론/수용]
-
-### 💎 결론
-[최종 요약]
-
-모든 출력은 한국어로 작성하세요.
-`;
-const SUMMARY_BOT_PROMPT = `
-당신은 종합 보고서 작성 전문가입니다.
-
-## 역할
-모든 에이전트의 의견과 토론을 분석하여, 객관적이고 균형 잡힌 종합 보고서를 작성하세요.
-
-## 보고서 구조 (한국어)
-### 📌 결론 요약
-[모든 에이전트 합의사항 또는 최종 결론]
-
-### 📊 에이전트별 주요 의견
-| 에이전트 | 주장 | 요약 |
-|---------|------|------|
-| [이름] | [주장] | [한 줄 요약] |
-
-### 🔍 합의된 사항
-- [모두가 동의한 사항]
-
-### 💭 논의된 사항 (합의 미달)
-- [의견이 나뉜 사항과 각 입장]
-
-### ⚠️ 발견된 위험/문제점
-| 위험도 | 문제 | 제안된 해결책 |
-|-------|------|-------------|
-| [높음/중간/낮음] | [문제] | [해결책] |
-
-### 🎯 다음 단계
-1. [구체적 행동 항목 1]
-2. [구체적 행동 항목 2]
-
-모든 출력은 한국어로 작성하세요.
+You MUST be critical. Unconditional approval is forbidden.
 `;
 // ============================================================================
 // VOTING STATE
 // ============================================================================
 const votingHistory = new Map();
 // ============================================================================
-// DEVIL'S ADVOCATE AUTO CRITIQUE (차별화 기능 3: 자동 반론 생성)
+// DEVIL'S ADVOCATE AUTO CRITIQUE
 // ============================================================================
 async function generateDevilsAdvocateCritique(targetAgentName, targetResult, team) {
     const daAgent = Array.from(team.agents.values()).find(a => isDevilsAdvocate(a.name));
     if (!daAgent) {
-        return "[Devil's Advocate가 팀에 없습니다]";
+        return "[Devil's Advocate not found in team]";
     }
-    const critiquePrompt = `다음은 ${targetAgentName} 에이전트의 분석 결과입니다:
+    const critiquePrompt = `The following is the analysis result from agent ${targetAgentName}:
 
 ---
 ${targetResult}
 ---
 
-## Devil's Advocate 역할
-위 분석에 대해 다음 항목들을 반드시 포함하여 비판적 분석을 하세요:
+## Devil's Advocate Role
+Provide a critical analysis of the above, including:
 
-### 🚨 문제점 (What's Wrong)
-- 위 분석의 문제점, 논리적 오류, 놓친 부분
+### 🚨 What's Wrong
+- Problems, logical errors, and overlooked aspects
 
-### 💡 대안 (Alternative Approach)
-- 더 나은 접근법이 있다면 제시
+### 💡 Alternative Approach
+- Better approaches if available
 
-### ⚠️ 다른 에이전트가 놓친 것 (What Others Missed)
-- 엣지 케이스, 예외 상황, 고려되지 않은 요소
+### ⚠️ What Others Missed
+- Edge cases, exceptions, unconsidered factors
 
-### 🔍 검증이 필요한 가정
-- 증명되지 않은 전제나 가정
+### 🔍 Unverified Assumptions
+- Unproven premises or assumptions
 
-반드시 비판적이어야 하며, 무조건적인 승인은 금지입니다.`;
+You MUST be critical. Unconditional approval is forbidden.`;
     try {
         const { sessionID } = await spawnAgentSession(daAgent.name, critiquePrompt);
         return await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        return `[Devil's Advocate 분석 실패: ${errorMessage}]`;
+        return `[Devil's Advocate critique failed: ${errorMessage}]`;
     }
 }
-// Devil's Advocate 이름 매칭 (여러 변형 지원 + 한국어)
+// Devil's Advocate name matching (supports multiple variants)
 const DEVILS_ADVOCATE_NAMES = [
     "devil-s-advocate",
     "devils-advocate",
     "devil_advocate",
     "devilsadvocate",
     "devil-sadvocate",
-    "반론가", // Korean "Devil's Advocate"
-    "비판가", // Korean "Critic"
 ];
 function isDevilsAdvocate(agentName) {
     const normalized = agentName.toLowerCase().replace(/[_-]/g, "");
@@ -506,7 +415,7 @@ function detectConflict(teamId, results) {
     const agents = Array.from(results.keys());
     if (agents.length < 2)
         return null;
-    // 간단한 충돌 감지: 결과가 서로 다른 에이전트가 다른 결론에 도달
+    // Simple conflict detection: different agents reached different conclusions
     const values = Array.from(results.values());
     const uniqueValues = new Set(values);
     if (uniqueValues.size > 1) {
@@ -520,29 +429,29 @@ function detectConflict(teamId, results) {
     return null;
 }
 function resolveConflict(conflict) {
-    let resolution = `## 충돌 해결 토론\n\n`;
-    resolution += `**주제**: ${conflict.topic}\n`;
-    resolution += `**참여 에이전트**: ${conflict.agents.join(", ")}\n\n`;
-    resolution += `### 각 에이전트 입장\n`;
+    let resolution = `## Conflict Resolution Debate\n\n`;
+    resolution += `**Topic**: ${conflict.topic}\n`;
+    resolution += `**Participating Agents**: ${conflict.agents.join(", ")}\n\n`;
+    resolution += `### Each Agent's Position\n`;
     conflict.agents.forEach((agent, i) => {
         resolution += `**${agent}**: ${conflict.positions[i]}\n`;
     });
-    resolution += `\n### 해결 방안\n`;
-    resolution += `1. 각 입장의 장단점 분석\n`;
-    resolution += `2. 공통점 찾기\n`;
-    resolution += `3. 통합 솔루션 제안\n`;
-    resolution += `4. Devil's Advocate 최종 검토\n\n`;
+    resolution += `\n### Resolution Steps\n`;
+    resolution += `1. Analyze pros and cons of each position\n`;
+    resolution += `2. Find common ground\n`;
+    resolution += `3. Propose integrated solution\n`;
+    resolution += `4. Devil's Advocate final review\n\n`;
     return resolution;
 }
 // ============================================================================
 // MESSAGE PROTOCOL
 // ============================================================================
 /**
- * SendMessage 구현 - 에이전트 간 메시지 교환
- * @param message 전송할 메시지
+ * SendMessage implementation - exchange messages between agents
+ * @param message Message to send
  */
 function sendMessage(message) {
-    // 팀별 메시지 큐 키 생성
+    // Create team-specific message queue key
     const baseKey = message.recipient || "broadcast";
     const key = message.teamId ? `${message.teamId}:${baseKey}` : baseKey;
     const queue = messageQueue.get(key) || [];
@@ -557,11 +466,11 @@ function sendMessage(message) {
     }
 }
 /**
- * 에이전트 실행 결과를 팀원들에게 방송
- * @param teamId 팀 ID
- * @param senderName 발신자 에이전트 이름
- * @param result 실행 결과
- * @param success 성공 여부
+ * Broadcast agent execution result to team members
+ * @param teamId Team ID
+ * @param senderName Sender agent name
+ * @param result Execution result
+ * @param success Success status
  */
 function broadcastAgentResult(teamId, senderName, result, success) {
     const summary = success && result
@@ -577,11 +486,11 @@ function broadcastAgentResult(teamId, senderName, result, success) {
     });
 }
 /**
- * 특정 에이전트에게 메시지 전송 (DM)
- * @param teamId 팀 ID
- * @param senderName 발신자
- * @param recipientName 수신자
- * @param content 메시지 내용
+ * Send direct message to specific agent
+ * @param teamId Team ID
+ * @param senderName Sender
+ * @param recipientName Recipient
+ * @param content Message content
  */
 function sendDirectMessage(teamId, senderName, recipientName, content) {
     sendMessage({
@@ -595,10 +504,10 @@ function sendDirectMessage(teamId, senderName, recipientName, content) {
     });
 }
 /**
- * 팀 메시지 가져오기
- * @param teamId 팀 ID
- * @param recipient 수신자 (broadcast 포함)
- * @param since 이후 시간부터의 메시지만
+ * Get team messages
+ * @param teamId Team ID
+ * @param recipient Recipient (including broadcast)
+ * @param since Only messages since this time
  */
 function getTeamMessages(teamId, recipient = "broadcast", since) {
     const key = `${teamId}:${recipient}`;
@@ -616,28 +525,28 @@ function getTeamMessages(teamId, recipient = "broadcast", since) {
     return all;
 }
 /**
- * 에이전트 간 컨텍스트 형식화 (프롬프트용)
- * @param teamId 팀 ID
- * @param excludeAgent 제외할 에이전트 이름
+ * Format agent context for prompts
+ * @param teamId Team ID
+ * @param excludeAgent Agent name to exclude
  */
 function formatAgentContext(teamId, excludeAgent) {
     const messages = getTeamMessages(teamId, "broadcast");
     if (messages.length === 0) {
-        return "(다른 에이전트의 결과가 아직 없습니다)";
+        return "(No results from other agents yet)";
     }
     const filtered = excludeAgent
         ? messages.filter(m => m.sender !== excludeAgent)
         : messages;
     if (filtered.length === 0) {
-        return "(다른 에이전트의 결과가 아직 없습니다)";
+        return "(No results from other agents yet)";
     }
     return filtered
         .map(m => `### ${m.sender}:\n${m.summary || m.content.slice(0, 300)}`)
         .join("\n\n");
 }
 /**
- * 팀 메시지 큐 정리
- * @param teamId 팀 ID
+ * Clear team message queue
+ * @param teamId Team ID
  */
 function clearTeamMessages(teamId) {
     const keysToDelete = [];
@@ -686,34 +595,19 @@ async function spawnAgentSession(agentName, task, teamId) {
         throw new Error("Failed to create session: no session ID returned");
     }
     const agentConfig = opencodeConfig[agentName];
-    // Devil's Advocate면 강제 프롬프트 적용
+    // Apply Devil's Advocate prompt if applicable
     const isDA = isDevilsAdvocate(agentName);
     const basePrompt = agentConfig?.prompt_append || "";
-    // 한국어 프리셋 감지 및 프롬프트 적용 (차별화 기능 1)
-    let koreanPromptAddon = "";
-    if (teamId) {
-        const team = teams.get(teamId);
-        if (team) {
-            if (team.preset === "korean-review") {
-                koreanPromptAddon = KOREAN_REVIEW_PROMPT;
-            }
-            else if (team.preset === "korean-debate" || team.preset === "debate") {
-                koreanPromptAddon = KOREAN_DEBATE_PROMPT;
-            }
-        }
-    }
-    // 시스템 프롬프트 구성
+    // Build system prompt
     const effectiveSystemPrompt = isDA
         ? basePrompt + "\n\n" + DEVILS_ADVOCATE_PROMPT
-        : koreanPromptAddon
-            ? basePrompt + "\n\n" + koreanPromptAddon
-            : basePrompt;
-    // SendMessage: 다른 에이전트의 결과를 컨텍스트에 추가
+        : basePrompt;
+    // Add other agents' results to context
     let fullTask = task;
     if (teamId) {
         const agentContext = formatAgentContext(teamId, agentName);
-        if (agentContext && !agentContext.includes("아직 없습니다")) {
-            fullTask = `${task}\n\n## 다른 팀원들의 결과:\n${agentContext}\n\n이 정보를 고려하여 작업을 수행하세요.`;
+        if (agentContext && !agentContext.includes("No results yet")) {
+            fullTask = `${task}\n\n## Other Team Members' Results:\n${agentContext}\n\nConsider this information when performing your task.`;
         }
     }
     const promptBody = {
@@ -864,26 +758,26 @@ function findCyclicDependencies(team) {
     return cyclic;
 }
 /**
- * 에이전트 실행 함수 - SendMessage 프로토콜 지원
- * @param name 에이전트 이름
- * @param agent 에이전트 객체
- * @param task 작업 내용
- * @param timeout 타임아웃(ms)
- * @param teamId 팀 ID (메시지 방송용)
+ * Agent execution function - SendMessage protocol support
+ * @param name Agent name
+ * @param agent Agent object
+ * @param task Task content
+ * @param timeout Timeout (ms)
+ * @param teamId Team ID (for message broadcasting)
  */
 async function executeAgent(name, agent, task, timeout, teamId) {
     agent.status = "thinking";
     try {
-        const prompt = `${task}\n\n당신은 ${name}(${agent.role}) 역할입니다. 전문성으로 작업을 수행해주세요.`;
+        const prompt = `${task}\n\nYou are ${name} (${agent.role}). Perform this task with your expertise.`;
         const { sessionID } = await spawnAgentSession(name, prompt, teamId);
         agent.sessionID = sessionID;
         agent.status = "responding";
         const result = await waitForSessionCompletion(sessionID, timeout);
         agent.status = "completed";
         agent.result = result;
-        // Reputation: 에이전트 평판 업데이트
+        // Reputation: update agent reputation
         updateAgentReputation(name, true);
-        // SendMessage: 팀원들에게 결과 방송
+        // SendMessage: broadcast result to team members
         if (teamId) {
             broadcastAgentResult(teamId, name, result, true);
         }
@@ -892,9 +786,9 @@ async function executeAgent(name, agent, task, timeout, teamId) {
     catch (error) {
         agent.status = "error";
         agent.error = error instanceof Error ? error.message : String(error);
-        // Reputation: 실패도 기록
+        // Reputation: record failure
         updateAgentReputation(name, false);
-        // SendMessage: 실패 메시지도 방송
+        // SendMessage: broadcast failure message
         if (teamId) {
             broadcastAgentResult(teamId, name, agent.error, false);
         }
@@ -936,21 +830,15 @@ const PRESETS = {
     fullstack: ["fullstack-developer", "devil-s-advocate"],
     research: ["explore", "data-scientist", "devil-s-advocate"],
     ai: ["ai-engineer", "llm-architect", "prompt-engineer", "devil-s-advocate"],
-    // Korean-optimized presets (차별화 기능 1)
-    "korean-review": ["code-reviewer", "devil-s-advocate"],
-    "korean-debate": ["planner", "devil-s-advocate"],
     debate: ["planner", "devil-s-advocate", "security-auditor"],
 };
 const PRESET_KEYWORDS = {
-    security: ["security", "보안", "취약점"],
-    debug: ["debug", "버그", "에러"],
-    planning: ["planning", "계획", "설계"],
-    implementation: ["implement", "구현", "개발"],
-    research: ["research", "조사", "탐색"],
-    // Korean keywords (차별화 기능 1)
-    "korean-review": ["한국어", "korean", "리뷰"],
-    "korean-debate": ["토론", "debate", "한국어"],
-    debate: ["토론", "debate", "논의"],
+    security: ["security", "vulnerability"],
+    debug: ["debug", "bug", "error"],
+    planning: ["planning", "plan", "design"],
+    implementation: ["implement", "develop", "build"],
+    research: ["research", "investigate", "explore"],
+    debate: ["debate", "discuss", "argument"],
 };
 function detectPreset(request) {
     const lowerRequest = request.toLowerCase();
@@ -1110,16 +998,16 @@ const teamDiscussTool = tool({
         let response = `## Discussion: ${truncateText(args.topic, 100)}\n\n`;
         response += `**Team**: ${team.name}\n`;
         response += `**Rounds**: ${rounds}\n\n`;
-        // 팀 메시지 큐 정리 (새 토론 시작)
+        // Clear team message queue (start new discussion)
         clearTeamMessages(args.teamId);
         for (let r = 1; r <= rounds; r++) {
             response += `### Round ${r}\n\n`;
             for (const [name, agent] of team.agents) {
-                // SendMessage 프로토콜을 사용한 컨텍스트 수집
+                // Collect context using SendMessage protocol
                 const agentContext = formatAgentContext(args.teamId, name);
                 const prompt = r === 1
-                    ? `${args.topic}\n\n당신은 ${name} 역할입니다. 분석해주세요.`
-                    : `${args.topic}\n\n## 다른 에이전트 의견:\n${agentContext}\n\n## 추가 분석:\n${name}으로서 새로운 관점이나 반론을 제시하세요. 다른 에이전트가 놓친 점을 찾아주세요.`;
+                    ? `${args.topic}\n\nYou are ${name}. Please analyze.`
+                    : `${args.topic}\n\n## Other Agents' Opinions:\n${agentContext}\n\n## Additional Analysis:\nAs ${name}, provide new perspectives or counterarguments. Find what other agents missed.`;
                 try {
                     agent.status = "thinking";
                     const { sessionID } = await spawnAgentSession(name, prompt);
@@ -1128,7 +1016,7 @@ const teamDiscussTool = tool({
                     const result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
                     agent.status = "completed";
                     agent.result = result;
-                    // SendMessage: 결과를 팀원들에게 방송
+                    // SendMessage: broadcast result to team members
                     broadcastAgentResult(args.teamId, name, result, true);
                     response += `**${name}**:\n`;
                     response += `${truncateText(result, MAX_DISCUSSION_RESULT_LENGTH)}\n\n`;
@@ -1136,7 +1024,7 @@ const teamDiscussTool = tool({
                 catch (error) {
                     agent.status = "error";
                     agent.error = error instanceof Error ? error.message : String(error);
-                    // SendMessage: 실패 메시지도 방송
+                    // SendMessage: broadcast failure message
                     broadcastAgentResult(args.teamId, name, agent.error, false);
                     response += `**${name}**: [FAIL] Error - ${agent.error}\n\n`;
                 }
@@ -1273,12 +1161,12 @@ const teamAutoTool = tool({
         }
         r += `\n### Task\n${args.request}\n\n`;
         r += `---\n\n`;
-        // 라운드별 실행
+        // Execute by round
         for (let round = 1; round <= rounds; round++) {
             r += `## Round ${round}\n\n`;
             if (round === 1) {
-                // 라운드 1: 병렬 실행 (SendMessage 프로토콜 사용)
-                r += `*병렬 분석*\n\n`;
+                // Round 1: Parallel execution (using SendMessage protocol)
+                r += `*Parallel Analysis*\n\n`;
                 const executionPromises = Array.from(team.agents.entries()).map(([name, agent]) => executeAgent(name, agent, args.request, DEFAULT_TIMEOUT_SECONDS * 1000, teamId));
                 const results = await Promise.allSettled(executionPromises);
                 const settledResults = results.map((res, index) => {
@@ -1292,7 +1180,7 @@ const teamAutoTool = tool({
                         error: res.reason instanceof Error ? res.reason.message : String(res.reason),
                     };
                 });
-                // 결과 저장
+                // Store results
                 for (const { name, success, result, error } of settledResults) {
                     const statusIcon = success ? "[OK]" : "[FAIL]";
                     r += `### ${statusIcon} ${name}\n`;
@@ -1309,18 +1197,18 @@ const teamAutoTool = tool({
                     .map((res) => [res.name, res.result]));
             }
             else {
-                // 라운드 2+: 순차 토론 (SendMessage 프로토콜로 컨텍스트 공유)
-                r += `*토론 (다른 에이전트 결과 공유)*\n\n`;
+                // Round 2+: Sequential discussion (context sharing via SendMessage protocol)
+                r += `*Discussion (Sharing Other Agents' Results)*\n\n`;
                 for (const [name, agent] of team.agents) {
-                    // SendMessage 프로토콜을 사용한 컨텍스트 수집
+                    // Collect context using SendMessage protocol
                     const agentContext = formatAgentContext(teamId, name);
                     const discussPrompt = `${args.request}
 
-## 다른 에이전트 분석 결과:
-${agentContext || "(아직 없음)"}
+## Other Agents' Analysis Results:
+${agentContext || "(None yet)"}
 
-## 당신의 추가 분석:
-이전 분석을 바탕으로 새로운 관점이나 반론을 제시하세요. 중복을 피하고, 다른 에이전트가 놓친 점을 찾으세요.`;
+## Your Additional Analysis:
+Based on previous analyses, provide new perspectives or counterarguments. Avoid repetition and find what other agents missed.`;
                     try {
                         agent.status = "thinking";
                         const { sessionID } = await spawnAgentSession(name, discussPrompt);
@@ -1329,10 +1217,10 @@ ${agentContext || "(아직 없음)"}
                         const result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
                         agent.status = "completed";
                         agent.result = result;
-                        // SendMessage: 결과를 팀원들에게 방송
+                        // SendMessage: broadcast result to team members
                         broadcastAgentResult(teamId, name, result, true);
                         r += `**${name}**:\n${truncateText(result, MAX_DISCUSSION_RESULT_LENGTH)}\n\n`;
-                        // 컨텍스트 업데이트
+                        // Update context
                         if (team.results) {
                             team.results.set(name, result);
                         }
@@ -1340,7 +1228,7 @@ ${agentContext || "(아직 없음)"}
                     catch (error) {
                         agent.status = "error";
                         agent.error = error instanceof Error ? error.message : String(error);
-                        // SendMessage: 실패 메시지도 방송
+                        // SendMessage: broadcast failure message
                         broadcastAgentResult(teamId, name, agent.error, false);
                         r += `**${name}**: [FAIL] ${agent.error}\n\n`;
                     }
@@ -1876,10 +1764,10 @@ const agentRankingsTool = tool({
     },
 });
 // ============================================================================
-// VOTING SYSTEM TOOL (차별화 기능 2: 투표/합의 시스템)
+// VOTING SYSTEM TOOL
 // ============================================================================
 const teamVoteTool = tool({
-    description: "Run a vote among team agents on a proposal (차별화 기능: 투표/합의 시스템)",
+    description: "Run a vote among team agents on a proposal",
     args: {
         teamId: z.string().describe("Team ID"),
         proposal: z.string().describe("Proposal to vote on"),
@@ -1889,7 +1777,7 @@ const teamVoteTool = tool({
         if (!globalClient) {
             return "Error: OpenCode client not available";
         }
-        // 입력 검증
+        // Input validation
         if (!args.teamId || args.teamId.trim() === "") {
             return `Error: Team ID is required`;
         }
@@ -1904,28 +1792,28 @@ const teamVoteTool = tool({
             return `Error: Team has no agents to vote`;
         }
         const threshold = args.threshold ?? "majority";
-        let response = `## 🗳️ 투표 시작 (Vote Started)\n\n`;
+        let response = `## 🗳️ Vote Started\n\n`;
         response += `**Team**: ${team.name}\n`;
-        response += `**제안 (Proposal)**: ${args.proposal}\n`;
-        response += `**합의 기준 (Threshold)**: ${threshold === "unanimous" ? "만장일치 (Unanimous)" : "다수결 (Majority)"}\n\n`;
+        response += `**Proposal**: ${args.proposal}\n`;
+        response += `**Threshold**: ${threshold === "unanimous" ? "Unanimous" : "Majority"}\n\n`;
         const votes = [];
         const votePromises = [];
         for (const [name, agent] of team.agents) {
-            const votePrompt = `다음 제안에 대해 투표해주세요:
+            const votePrompt = `Please vote on the following proposal:
 
-## 제안 (Proposal)
+## Proposal
 ${args.proposal}
 
-## 투표 옵션
-1. **approve** (찬성) - 이 제안을 지지합니다
-2. **reject** (반대) - 이 제안에 반대합니다
-3. **abstain** (기권) - 의견을 유보합니다
+## Voting Options
+1. **approve** - Support this proposal
+2. **reject** - Oppose this proposal
+3. **abstain** - Abstain from voting
 
-## 응답 형식
-**투표**: [approve/reject/abstain]
-**사유**: [간단한 이유]
+## Response Format
+**Vote**: [approve/reject/abstain]
+**Reason**: [Brief reason]
 
-당신은 ${name}(${agent.role}) 역할입니다. 이 제안에 대해 투표해주세요.`;
+You are ${name} (${agent.role}). Please vote on this proposal.`;
             const votePromise = (async () => {
                 try {
                     agent.status = "thinking";
@@ -1935,10 +1823,8 @@ ${args.proposal}
                     const result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
                     agent.status = "completed";
                     // Parse vote from result
-                    const voteMatch = result.match(/투표\s*[:：]\s*(approve|reject|abstain)/i) ||
-                        result.match(/vote\s*[:：]\s*(approve|reject|abstain)/i);
-                    const reasonMatch = result.match(/사유\s*[:：]\s*(.+)/i) ||
-                        result.match(/reason\s*[:：]\s*(.+)/i);
+                    const voteMatch = result.match(/vote\s*[:：]\s*(approve|reject|abstain)/i);
+                    const reasonMatch = result.match(/reason\s*[:：]\s*(.+)/i);
                     const vote = (voteMatch?.[1]?.toLowerCase() || "abstain");
                     const reason = reasonMatch?.[1] || truncateText(result, 200);
                     return { name, vote, reason };
@@ -1985,7 +1871,7 @@ ${args.proposal}
         }
         votingHistory.get(args.teamId).push(votingResult);
         // Format response
-        response += `---\n\n## 📊 투표 결과 (Voting Results)\n\n`;
+        response += `---\n\n## 📊 Voting Results\n\n`;
         const voteIcons = {
             approve: "✅",
             reject: "❌",
@@ -1999,22 +1885,22 @@ ${args.proposal}
             }
             response += `\n\n`;
         }
-        response += `---\n\n## 📈 집계 (Summary)\n\n`;
-        response += `| 찬성 (Approve) | 반대 (Reject) | 기권 (Abstain) | 합계 (Total) |\n`;
-        response += `|:-------------:|:-------------:|:--------------:|:-------------:|\n`;
+        response += `---\n\n## 📈 Summary\n\n`;
+        response += `| Approve | Reject | Abstain | Total |\n`;
+        response += `|:-------:|:------:|:-------:|:-----:|\n`;
         response += `| ${approve} | ${reject} | ${abstain} | ${total} |\n\n`;
-        const consensusKorean = {
-            unanimous: "✅ **만장일치 합의 (Unanimous Consensus)**",
-            majority: "✅ **다수결 합의 (Majority Consensus)**",
-            "no_consensus": "❌ **합의 도달 실패 (No Consensus)**",
+        const consensusText = {
+            unanimous: "✅ **Unanimous Consensus**",
+            majority: "✅ **Majority Consensus**",
+            "no_consensus": "❌ **No Consensus Reached**",
         };
-        response += `**결과 (Result)**: ${consensusKorean[consensus]}\n`;
+        response += `**Result**: ${consensusText[consensus]}\n`;
         response += `\n---\n\n**Team ID**: ${args.teamId}`;
         return response;
     },
 });
 // ============================================================================
-// TEAM SCORE TOOL (차별화 기능: 팀 결과 채점)
+// TEAM SCORE TOOL
 // ============================================================================
 const teamScoreTool = tool({
     description: "Score an agent's performance within a team context",
@@ -2054,13 +1940,12 @@ const teamScoreTool = tool({
     },
 });
 // ============================================================================
-// SUMMARY BOT TOOL (차별화 기능 4: 종합 보고서 봇)
+// SUMMARY BOT TOOL
 // ============================================================================
 const teamSummarizeTool = tool({
-    description: "Generate a comprehensive summary report from all team discussions and results (차별화 기능: 종합 보고서 봇)",
+    description: "Generate a comprehensive summary report from all team discussions and results",
     args: {
         teamId: z.string().describe("Team ID"),
-        language: z.enum(["korean", "english"]).optional().describe("Summary language (default: korean)"),
     },
     async execute(args) {
         if (!globalClient) {
@@ -2070,32 +1955,17 @@ const teamSummarizeTool = tool({
         if (!team) {
             return `Error: Team ${args.teamId} not found`;
         }
-        const language = args.language ?? "korean";
-        const isKorean = language === "korean";
         // Collect all agent results
         const agentResults = Array.from(team.agents.entries())
             .filter(([_, agent]) => agent.result)
             .map(([name, agent]) => `### ${name}\n${agent.result}`)
             .join("\n\n");
         if (!agentResults) {
-            return isKorean
-                ? "Error: 분석 결과가 없습니다. 먼저 에이전트를 실행하세요."
-                : "Error: No results found. Run agents first.";
+            return "Error: No results found. Run agents first.";
         }
         // Use a planner agent or the first available agent for summary
         const summaryAgentName = team.agents.has("planner") ? "planner" : Array.from(team.agents.keys())[0];
-        const summaryPrompt = isKorean
-            ? `${SUMMARY_BOT_PROMPT}
-
-## 팀 정보
-- **팀명**: ${team.name}
-- **작업**: ${team.task}
-
-## 에이전트별 결과
-${agentResults}
-
-위 모든 에이전트의 결과를 분석하여 종합 보고서를 작성하세요.`
-            : `You are a comprehensive report writer.
+        const summaryPrompt = `You are a comprehensive report writer.
 
 ## Team Information
 - **Team**: ${team.name}
@@ -2122,9 +1992,7 @@ Analyze all agent results and create a comprehensive summary report with:
             agent.status = "responding";
             const summary = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
             agent.status = "completed";
-            let response = isKorean
-                ? `## 📋 종합 보고서 (Summary Report)\n\n`
-                : `## 📋 Summary Report\n\n`;
+            let response = `## 📋 Summary Report\n\n`;
             response += `**Team**: ${team.name}\n`;
             response += `**Task**: ${team.task}\n`;
             response += `**Generated**: ${new Date().toISOString()}\n\n`;
@@ -2139,10 +2007,10 @@ Analyze all agent results and create a comprehensive summary report with:
     },
 });
 // ============================================================================
-// AGENT HANDOFF TOOL (차별화 기능: 에이전트 간 작업 위임)
+// AGENT HANDOFF TOOL
 // ============================================================================
 const agentHandoffTool = tool({
-    description: "Allow agents to delegate tasks to each other mid-execution (차별화 기능: 에이전트 핸드오프)",
+    description: "Allow agents to delegate tasks to each other mid-execution",
     args: {
         teamId: z.string().describe("Team ID"),
         fromAgent: z.string().describe("Agent delegating the task"),
@@ -2194,10 +2062,10 @@ const agentHandoffTool = tool({
     },
 });
 // ============================================================================
-// CONFLICT RESOLUTION TOOL (차별화 기능: 구조화된 충돌 해결)
+// CONFLICT RESOLUTION TOOL
 // ============================================================================
 const conflictResolveTool = tool({
-    description: "Structured debate format when agents disagree (차별화 기능: 충돌 해결)",
+    description: "Structured debate format when agents disagree",
     args: {
         teamId: z.string().describe("Team ID"),
         topic: z.string().describe("Topic of disagreement"),
@@ -2230,27 +2098,27 @@ const conflictResolveTool = tool({
         const daAgent = Array.from(team.agents.values()).find(a => isDevilsAdvocate(a.name));
         if (daAgent) {
             response += `### Phase 2: Devil's Advocate Critique\n\n`;
-            const critiquePrompt = `다음 주제에 대해 에이전트들이 서로 다른 의견을 가지고 있습니다:
+            const critiquePrompt = `Agents have different opinions on the following topic:
 
-## 주제: ${args.topic}
+## Topic: ${args.topic}
 
-## 각 에이전트 입장:
+## Each Agent's Position:
 ${args.positions.map(p => `- ${p.agent}: ${p.position}`).join('\n')}
 
-## Devil's Advocate 역할
-위 입장들에 대해 비판적 분석을 하세요:
-1. 각 입장의 약점
-2. 놓친 관점
-3. 더 나은 대안
+## Devil's Advocate Role
+Provide a critical analysis of these positions:
+1. Weaknesses of each position
+2. Overlooked perspectives
+3. Better alternatives
 
-반드시 비판적이어야 합니다.`;
+You MUST be critical.`;
             try {
                 const { sessionID } = await spawnAgentSession(daAgent.name, critiquePrompt);
                 const critique = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
                 response += `**${daAgent.name}**:\n${truncateText(critique, MAX_RESULT_LENGTH)}\n\n`;
             }
             catch (error) {
-                response += `[Devil's Advocate 분석 실패]\n\n`;
+                response += `[Devil's Advocate critique failed]\n\n`;
             }
         }
         // Phase 3: Proposed resolution
@@ -2261,10 +2129,10 @@ ${args.positions.map(p => `- ${p.agent}: ${p.position}`).join('\n')}
     },
 });
 // ============================================================================
-// DEVIL'S ADVOCATE AUTO CRITIQUE TOOL (차별화 기능: 자동 반론 생성)
+// DEVIL'S ADVOCATE AUTO CRITIQUE TOOL
 // ============================================================================
 const daCritiqueTool = tool({
-    description: "Devil's Advocate automatically critiques other agents' results (차별화 기능: 자동 반론 생성)",
+    description: "Devil's Advocate automatically critiques other agents' results",
     args: {
         teamId: z.string().describe("Team ID"),
         targetAgent: z.string().describe("Agent to critique (omit for all agents)"),
@@ -2338,123 +2206,123 @@ const plugin = async (input) => {
             "agent-score": agentScoreTool,
             "agent-scores": agentScoresTool,
             "agent-rankings": agentRankingsTool,
-            // 차별화 기능 (Differentiation features)
+            // Differentiation features
             "team-vote": teamVoteTool,
             "team-score": teamScoreTool,
             "team-summarize": teamSummarizeTool,
             "agent-handoff": agentHandoffTool,
             "conflict-resolve": conflictResolveTool,
             "da-critique": daCritiqueTool,
-            // V2: 간소화된 올인원 도구
+            // V2: Simplified all-in-one tool
             "squad": squadTool,
         },
     };
 };
 // ============================================================================
-// V2: SIMPLIFIED ALL-IN-ONE TOOL (간소화된 올인원 도구)
+// V2: SIMPLIFIED ALL-IN-ONE TOOL
 // ============================================================================
 /**
- * squad - 단일 명령으로 모든 것을 처리
+ * squad - Handle everything with a single command
  *
- * 개선 사항:
- * 1. 자동 에이전트 선택 (API 호출 최소화)
- * 2. 캐싱 (5분 TTL)
- * 3. 재시도 (최대 2회)
- * 4. 간소화된 출력
+ * Improvements:
+ * 1. Automatic agent selection (minimize API calls)
+ * 2. Caching (5 min TTL)
+ * 3. Retry (max 2 times)
+ * 4. Simplified output
  */
 const squadCache = new Map();
-const SQUAD_CACHE_TTL = 5 * 60 * 1000; // 5분
+const SQUAD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const squadTool = tool({
-    description: `🚀 [V2 간소화] 한 번의 명령으로 팀을 생성하고 실행하여 결과를 얻습니다.
+    description: `🚀 [V2 Simplified] Create and execute a team in one command.
 
-**개선된 점:**
-- 자동으로 최적의 에이전트 선택 (2-3명)
-- 캐싱 지원 (동일한 요청은 5분간 재사용)
-- 자동 재시도 (실패 시 최대 2회)
-- 간소화된 출력
+**Improvements:**
+- Automatic optimal agent selection (2-3 agents)
+- Caching support (same request reused for 5 minutes)
+- Automatic retry (up to 2 times on failure)
+- Simplified output
 
-**사용 예시:**
-- /squad task="이 코드의 보안 취약점을 분석해줘"
-- /squad task="버그 수정 도와줘" mode="fast"
-- /squad task="새 기능 구현 계획 세워줘" mode="thorough"
-- /squad task="혁신적인 아이디어 브레인스토밍" mode="creative"
+**Examples:**
+- /squad task="Analyze security vulnerabilities in this code"
+- /squad task="Help me fix this bug" mode="fast"
+- /squad task="Plan new feature implementation" mode="thorough"
+- /squad task="Brainstorm innovative ideas" mode="creative"
 
-**모드:**
-- fast (기본): 2명 에이전트, 빠른 응답
-- thorough: 3명 에이전트, 깊이 있는 분석
-- review: 3명+보안, 종합 코드 리뷰
-- creative: 5명+DA, 창의적 개발 팀 (혁신/브레인스토밍)`,
+**Modes:**
+- fast (default): 2 agents, quick response
+- thorough: 3 agents, deep analysis
+- review: 3+security, comprehensive code review
+- creative: 5+DA, creative development team (innovation/brainstorming)`,
     args: {
-        task: z.string().describe("수행할 작업"),
+        task: z.string().describe("Task to perform"),
         mode: z.enum(["fast", "thorough", "review", "creative"]).optional().default("fast")
-            .describe("fast: 2명, thorough: 3명, review: 3명+보안, creative: 5명+DA"),
-        useCache: z.boolean().optional().default(true).describe("캐시 사용 여부 (기본: true)"),
+            .describe("fast: 2 agents, thorough: 3 agents, review: 3+security, creative: 5+DA"),
+        useCache: z.boolean().optional().default(true).describe("Use cache (default: true)"),
     },
     execute: async (params) => {
         const task = params.task;
         const mode = params.mode || "fast";
         const useCache = params.useCache !== false;
-        // 캐시 키 생성
+        // Create cache key
         const cacheKey = `${mode}:${task.slice(0, 100)}`;
-        // 캐시 확인
+        // Check cache
         if (useCache) {
             const cached = squadCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < SQUAD_CACHE_TTL) {
-                return `📦 [캐시된 결과 - 5분 내 동일 요청]\n\n${cached.result}`;
+                return `📦 [Cached result - same request within 5 minutes]\n\n${cached.result}`;
             }
         }
-        // 작업 분석하여 최적 에이전트 선택
+        // Analyze task and select optimal agents
         const taskLower = task.toLowerCase();
         let agents;
         let reason;
-        // Creative 모드: 큰 팀 (창의적 + 개발 + Devil's Advocate)
+        // Creative mode: large team (creative + dev + Devil's Advocate)
         if (mode === "creative") {
             agents = [
-                "planner", // 계획 및 설계
-                "fullstack-developer", // 풀스택 개발
-                "frontend-developer", // 프론트엔드 전문
-                "backend-developer", // 백엔드 전문
-                "ui-designer", // UI/UX 디자인
-                "devil-s-advocate", // 비판적 검토
+                "planner", // Planning and design
+                "fullstack-developer", // Full-stack development
+                "frontend-developer", // Frontend specialist
+                "backend-developer", // Backend specialist
+                "ui-designer", // UI/UX design
+                "devil-s-advocate", // Critical review
             ];
-            reason = "🎨 Creative 모드: 6명 대형 팀 (계획+개발+디자인+DA)";
+            reason = "🎨 Creative mode: 6-agent large team (plan+dev+design+DA)";
         }
-        else if (/보안|security|취약점|vulnerability|인증|auth|토큰|token|암호/i.test(task)) {
+        else if (/security|vulnerability|auth|token|encrypt/i.test(task)) {
             agents = mode === "review"
                 ? ["security-auditor", "code-reviewer", "devil-s-advocate"]
                 : ["security-auditor", "devil-s-advocate"];
-            reason = "🔒 보안 작업 감지";
+            reason = "🔒 Security task detected";
         }
-        else if (/버그|bug|에러|error|디버그|debug|수정|fix/i.test(task)) {
+        else if (/bug|error|debug|fix/i.test(task)) {
             agents = mode === "review"
                 ? ["debugger", "code-reviewer", "devil-s-advocate"]
                 : ["debugger", "devil-s-advocate"];
-            reason = "🐛 디버그 작업 감지";
+            reason = "🐛 Debug task detected";
         }
-        else if (/구현|implement|개발|develop|만들|create|추가|add|기능/i.test(task)) {
+        else if (/implement|develop|create|add|feature/i.test(task)) {
             agents = mode === "fast"
                 ? ["planner", "devil-s-advocate"]
                 : ["planner", "fullstack-developer", "devil-s-advocate"];
-            reason = "🛠️ 구현 작업 감지";
+            reason = "🛠️ Implementation task detected";
         }
-        else if (/계획|plan|설계|design|아키텍처|architecture/i.test(task)) {
+        else if (/plan|design|architecture/i.test(task)) {
             agents = ["planner", "devil-s-advocate"];
-            reason = "📋 계획 작업 감지";
+            reason = "📋 Planning task detected";
         }
-        else if (/리뷰|review|검토|check|분석|analyze/i.test(task)) {
+        else if (/review|check|analyze/i.test(task)) {
             agents = mode === "fast"
                 ? ["code-reviewer", "devil-s-advocate"]
                 : ["code-reviewer", "security-auditor", "devil-s-advocate"];
-            reason = "🔍 리뷰 작업 감지";
+            reason = "🔍 Review task detected";
         }
         else {
-            // 기본: 리뷰
+            // Default: review
             agents = mode === "thorough"
                 ? ["code-reviewer", "security-auditor", "devil-s-advocate"]
                 : ["code-reviewer", "devil-s-advocate"];
-            reason = "📝 일반 작업 (기본 리뷰 모드)";
+            reason = "📝 General task (default review mode)";
         }
-        // 팀 생성
+        // Create team
         const teamId = `team-${Date.now()}-${randomUUID().slice(0, 8)}`;
         const team = {
             id: teamId,
@@ -2465,7 +2333,7 @@ const squadTool = tool({
             createdAt: new Date(),
             task,
         };
-        // 에이전트 추가
+        // Add agents
         for (const agentName of agents) {
             team.agents.set(agentName, {
                 name: agentName,
@@ -2476,7 +2344,7 @@ const squadTool = tool({
         }
         teams.set(teamId, team);
         saveTeam(team);
-        // 병렬 실행 (재시도 포함)
+        // Parallel execution (with retry)
         const results = [];
         const taskPrompt = `${task}\n\n## Output Guide\n- Be concise and focus on key points\n- Provide practical, actionable suggestions`;
         for (const agentName of agents) {
@@ -2488,7 +2356,7 @@ const squadTool = tool({
                 try {
                     const sessionResult = await spawnAgentSession(agentName, taskPrompt, teamId);
                     if (sessionResult) {
-                        // 결과 수집
+                        // Collect results
                         const messages = await globalClient.session.messages({
                             path: { id: sessionResult.sessionID }
                         });
@@ -2513,10 +2381,10 @@ const squadTool = tool({
             }
             results.push({ name: agentName, success, result, error });
         }
-        // 결과 포맷팅
-        let output = `🚀 **Squad 실행 완료** (${mode} 모드)\n`;
+        // Format results
+        let output = `🚀 **Squad Execution Complete** (${mode} mode)\n`;
         output += `📊 ${reason}\n`;
-        output += `👥 에이전트: ${agents.join(", ")}\n\n`;
+        output += `👥 Agents: ${agents.join(", ")}\n\n`;
         output += `---\n\n`;
         for (const r of results) {
             if (r.success && r.result) {
@@ -2526,27 +2394,27 @@ const squadTool = tool({
             }
             else if (r.error) {
                 output += `### ⚠️ ${r.name}\n\n`;
-                output += `**오류**: ${r.error}\n\n`;
+                output += `**Error**: ${r.error}\n\n`;
             }
         }
-        // 종합
+        // Summary
         const successCount = results.filter(r => r.success).length;
         output += `---\n`;
-        output += `📊 **결과**: ${successCount}/${results.length} 에이전트 성공\n`;
+        output += `📊 **Result**: ${successCount}/${results.length} agents succeeded\n`;
         if (successCount === results.length) {
-            output += `✅ 모든 에이전트가 성공적으로 완료했습니다.\n`;
+            output += `✅ All agents completed successfully.\n`;
         }
         else if (successCount > 0) {
-            output += `⚠️ 일부 에이전트가 실패했습니다. 결과를 참고하세요.\n`;
+            output += `⚠️ Some agents failed. Please review the results.\n`;
         }
         else {
-            output += `❌ 모든 에이전트가 실패했습니다. 요청을 다시 시도해주세요.\n`;
+            output += `❌ All agents failed. Please try again.\n`;
         }
-        // 캐시 저장
+        // Save to cache
         if (useCache && successCount > 0) {
             squadCache.set(cacheKey, { result: output, timestamp: Date.now() });
         }
-        // 정리
+        // Cleanup
         teams.delete(teamId);
         return output;
     },
