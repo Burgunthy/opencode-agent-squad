@@ -55,10 +55,47 @@ interface ExecutionResult {
 const MAX_TEAMS = 50;
 const DEFAULT_TIMEOUT_MS = 90000;
 const POLL_INTERVAL_MS = 1500;
-const MAX_RESULT_LENGTH = 3000; // Increased from 2000
-const MAX_DISCUSSION_RESULT_LENGTH = 1500; // Increased from 1000
+const MAX_RESULT_LENGTH = 3000;
+const MAX_DISCUSSION_RESULT_LENGTH = 1500;
 const DEFAULT_PRESET = "review";
 const DEFAULT_TIMEOUT_SECONDS = 90;
+
+// ============================================================================
+// UX HELPERS
+// ============================================================================
+
+// Box drawing characters for pretty output
+const BOX = {
+  TL: "┌", TR: "┐", BL: "└", BR: "┘",
+  H: "─", V: "│",
+  X: "┼", XT: "┬", XB: "┴", XL: "├", XR: "┤"
+};
+
+function formatBox(title: string, content: string, width: number = 60): string {
+  const titleCentered = title.padStart(Math.floor((width - title.length) / 2) + title.length).padEnd(width);
+  const lines = content.split("\n");
+
+  let output = `${BOX.TL}${BOX.H.repeat(width)}${BOX.TR}\n`;
+  output += `${BOX.V}${titleCentered}${BOX.V}\n`;
+  output += `${BOX.X}${BOX.H.repeat(width)}${BOX.XT}\n`;
+
+  for (const line of lines) {
+    const padded = line.padEnd(width - 2);
+    output += `${BOX.V} ${padded}${BOX.V}\n`;
+  }
+
+  output += `${BOX.BL}${BOX.H.repeat(width)}${BOX.BR}\n`;
+  return output;
+}
+
+function formatSection(title: string): string {
+  return `\n${"=".repeat(60)}\n${title}\n${"=".repeat(60)}\n`;
+}
+
+function formatAgentHeader(name: string, status: "success" | "error" | "warning"): string {
+  const icons = { success: "✅", error: "❌", warning: "⚠️" };
+  return `\n${icons[status]} **${name}**\n`;
+}
 
 // ============================================================================
 // CACHE IMPLEMENTATION - Proper LRU with TTL
@@ -83,7 +120,6 @@ class SquadCache {
   }
 
   private generateKey(mode: string, task: string, context?: string): string {
-    // Include mode, task hash, and optional context hash
     const taskHash = createHash("md5").update(task).digest("hex").slice(0, 8);
     const contextHash = context
       ? createHash("md5").update(context).digest("hex").slice(0, 8)
@@ -103,17 +139,14 @@ class SquadCache {
       return null;
     }
 
-    // Update access stats for LRU
     entry.accessCount++;
     entry.lastAccess = now;
     return entry.result;
   }
 
   set(mode: string, task: string, result: string, context?: string): void {
-    // Clean expired entries
     this.cleanExpired();
 
-    // Enforce max size using LRU (remove least recently accessed)
     if (this.cache.size >= this.maxSize) {
       let lruKey: string | null = null;
       let oldestAccess = Infinity;
@@ -235,7 +268,6 @@ function loadPersistedTeams(): Map<string, Team> {
       const teams = new Map<string, Team>();
       for (const [id, raw] of Object.entries(rawTeams)) {
         const team = raw as any;
-        // Reconstruct Map from plain object
         team.agents = new Map(Object.entries(team.agents));
         team.createdAt = new Date(team.createdAt);
         team.lastActivity = new Date(team.lastActivity || team.createdAt);
@@ -254,13 +286,11 @@ function loadPersistedTeams(): Map<string, Team> {
 
 function savePersistedTeams(teams: Map<string, Team>): void {
   try {
-    // Ensure directory exists
     const dir = path.dirname(TEAMS_PERSIST_FILE);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    // Convert to plain object for JSON serialization
     const rawTeams: Record<string, any> = {};
     for (const [id, team] of teams) {
       rawTeams[id] = {
@@ -353,16 +383,31 @@ function validateAgentAvailability(agentNames: string[]): {
   return { valid, invalid };
 }
 
-function estimateAgentCost(agentCount: number, mode: string): string {
-  // Rough estimate: ~1000 tokens per agent response
-  const estimatedTokens = agentCount * 1000;
-  const costPer1k = 0.003; // Conservative estimate for Opus
-  const estimatedCost = (estimatedTokens / 1000) * costPer1k;
-
+function estimateAgentCost(agentCount: number): string {
   if (agentCount >= 4) {
-    return `⚠️ Cost warning: Running ${agentCount} agents may cost ~$${estimatedCost.toFixed(4)}. Continue?`;
+    return `💰 *Cost estimate*: Running ${agentCount} agents (~${(agentCount * 0.003).toFixed(4)} USD)`;
   }
   return "";
+}
+
+function getSuggestedAgents(mode: string): string {
+  const available = Object.keys(opencodeConfig);
+  if (available.length === 0) return "No agents configured in opencode.json";
+
+  // Find best matching preset based on available agents
+  for (const [presetName, agents] of Object.entries(PRESETS)) {
+    const valid = agents.filter(a => available.includes(a));
+    if (valid.length >= 2) {
+      return `Try: /squad task="your task" mode="${presetName}"`;
+    }
+  }
+
+  // Fallback: suggest first 2 available agents
+  if (available.length >= 2) {
+    return `Try: /team-spawn preset="${available.slice(0, 2).join(",")}" teamName="myteam" task="your task"`;
+  }
+
+  return "Configure agents in opencode.json first";
 }
 
 // ============================================================================
@@ -387,19 +432,15 @@ async function spawnAgentSession(
 
   const agentConfig = opencodeConfig[agentName];
 
-  // Apply Devil's Advocate prompt if applicable
   const isDA = isDevilsAdvocate(agentName);
   const basePrompt = agentConfig?.prompt_append || "";
 
-  // Build system prompt
   const effectiveSystemPrompt = isDA
     ? basePrompt + "\n\n" + DEVILS_ADVOCATE_PROMPT
     : basePrompt;
 
-  // Add other agents' results to context (for sequential discussion)
   let fullTask = task;
   if (teamId && !isDA) {
-    // DA runs separately in second-pass
     const agentContext = formatAgentContext(teamId, agentName);
     if (agentContext && !agentContext.includes("No results yet")) {
       fullTask = `${task}\n\n## Other Team Members' Results:\n${agentContext}\n\nConsider this information when performing your task.`;
@@ -499,14 +540,12 @@ async function cleanupSession(sessionID: string): Promise<void> {
     cleanupStats.failed++;
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    // Track failure
     cleanupStats.failures.push({
       sessionID,
       error: errorMessage,
       timestamp: Date.now(),
     });
 
-    // Keep only last 100 failures
     if (cleanupStats.failures.length > 100) {
       cleanupStats.failures.shift();
     }
@@ -533,7 +572,6 @@ async function runDevilsAdvocateSecondPass(
     };
   }
 
-  // Collect all other agents' results
   const otherResults: string[] = [];
   for (const [name, agent] of team.agents) {
     if (!isDevilsAdvocate(name) && agent.result) {
@@ -549,7 +587,6 @@ async function runDevilsAdvocateSecondPass(
     };
   }
 
-  // Build DA prompt with other results
   const daPrompt = `${task}\n\n## Other Agents' Analysis:\n\n${otherResults.join("\n\n---\n\n")}\n\n## Your Task:\nAs the Devil's Advocate, critically review the analysis above. Identify:\n1. What's wrong or missing\n2. Alternative approaches\n3. Edge cases others missed\n\nBe thorough and critical.`;
 
   let sessionID: string | undefined;
@@ -602,7 +639,6 @@ function enforceMaxTeams(): void {
     teams.delete(id);
   }
 
-  // Persist after cleanup
   savePersistedTeams(teams);
 }
 
@@ -647,7 +683,6 @@ async function executeAgent(
     const result = await waitForSessionCompletion(sessionID, timeout);
     agent.status = "completed";
 
-    // Store with truncation info
     const { text: truncatedResult, wasTruncated } = truncateText(result, MAX_RESULT_LENGTH);
     agent.result = truncatedResult;
     agent.resultTruncated = wasTruncated;
@@ -658,7 +693,6 @@ async function executeAgent(
     agent.error = error instanceof Error ? error.message : String(error);
     return { name, success: false, error: agent.error };
   } finally {
-    // Cleanup session in both success and error paths
     if (sessionID) {
       try {
         await cleanupSession(sessionID);
@@ -666,11 +700,9 @@ async function executeAgent(
         const errorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
         console.warn(`[agent-squad] Failed to cleanup session ${sessionID}: ${errorMessage}`);
       }
-      // Clear sessionID to prevent double-cleanup
       agent.sessionID = null;
     }
 
-    // Update team activity
     if (teamId) {
       const team = teams.get(teamId);
       if (team) {
@@ -681,7 +713,7 @@ async function executeAgent(
 }
 
 function formatExecutionResults(team: Team, results: ExecutionResult[]): string {
-  let output = `---\n\n`;
+  let output = "";
   let successCount = 0;
   let truncatedCount = 0;
 
@@ -690,91 +722,416 @@ function formatExecutionResults(team: Team, results: ExecutionResult[]): string 
       successCount++;
       if (r.truncated) truncatedCount++;
 
-      output += `### ${r.name}\n\n`;
-      output += r.result;
+      output += formatAgentHeader(r.name, "success");
+      output += `${r.result}`;
       if (r.truncated) {
-        output += `\n\n⚠️ *Result was truncated to ${MAX_RESULT_LENGTH} characters*`;
+        output += `\n\n⚠️ *Output truncated to ${MAX_RESULT_LENGTH} chars*`;
       }
-      output += `\n\n`;
+      output += `\n`;
     } else if (r.error) {
-      output += `### ${r.name}\n\n`;
-      output += `**Error**: ${r.error}\n\n`;
+      output += formatAgentHeader(r.name, "error");
+      output += `**Error**: ${r.error}\n`;
+      if (r.error.includes("not defined")) {
+        output += `\n💡 *Hint*: Check if agent is configured in opencode.json\n`;
+      }
+      output += `\n`;
     }
   }
 
-  output += `---\n`;
-  output += `**Result**: ${successCount}/${results.length} agents succeeded\n`;
+  // Summary section
+  output += formatSection("Summary");
+  output += `✅ **Success**: ${successCount}/${results.length} agents completed\n`;
 
   if (truncatedCount > 0) {
-    output += `⚠️ ${truncatedCount} results were truncated.\n`;
+    output += `⚠️ **Warning**: ${truncatedCount} results truncated (limit: ${MAX_RESULT_LENGTH} chars)\n`;
   }
 
   if (successCount === results.length) {
-    output += `All agents completed successfully.\n`;
+    output += `🎉 All agents completed successfully!\n`;
   } else if (successCount > 0) {
-    output += `Some agents failed. Please review the results.\n`;
+    output += `⚠️ Some agents failed - see errors above\n`;
   } else {
-    output += `All agents failed. Please try again.\n`;
+    output += `❌ All agents failed - please try again\n`;
   }
 
-  // Show cleanup stats if there were failures
+  // Cleanup stats (only if failures)
   if (cleanupStats.failed > 0) {
-    output += `\n[Cleanup: ${cleanupStats.successful}/${cleanupStats.totalAttempts} successful`;
-    if (cleanupStats.failed > 0) {
-      output += `, ${cleanupStats.failed} failed]`;
-    } else {
-      output += `]`;
-    }
+    output += `\n[Cleanup: ${cleanupStats.successful}/${cleanupStats.totalAttempts} successful, ${cleanupStats.failed} failed]\n`;
   }
 
   return output;
 }
 
 // ============================================================================
+// ERROR MESSAGES WITH SUGGESTIONS
+// ============================================================================
+
+function getAgentNotFoundSuggestion(requestedAgents: string[]): string {
+  const available = Object.keys(opencodeConfig);
+
+  let msg = `❌ **Agent not found**\n\n`;
+  msg += `Requested agents: ${requestedAgents.join(", ")}\n\n`;
+
+  if (available.length === 0) {
+    msg += `💡 **No agents configured** in opencode.json\n\n`;
+    msg += `Fix: Add agents to your opencode.json:\n`;
+    msg += `{\n  "agent": {\n    "code-reviewer": {\n      "description": "You are a code reviewer..."\n    }\n  }\n}`;
+  } else {
+    msg += `💡 **Available agents**: ${available.join(", ")}\n\n`;
+    msg += `Suggestions:\n`;
+    msg += `• Use available agents: /squad task="..." mode="fast"\n`;
+    msg += `• Check spelling: ${requestedAgents.map(a => {
+      const closest = available.find(av => av.toLowerCase().includes(a.toLowerCase()) || a.toLowerCase().includes(av.toLowerCase()));
+      return closest ? `"${a}" → "${closest}"` : `"${a}"`;
+    }).join("\n    • ")}`;
+  }
+
+  return msg;
+}
+
+function getTeamNotFoundSuggestion(teamId: string): string {
+  const teamIds = Array.from(teams.keys()).slice(0, 5);
+
+  let msg = `❌ **Team not found**: "${teamId}"\n\n`;
+
+  if (teamIds.length > 0) {
+    msg += `💡 **Available teams**:\n`;
+    for (const id of teamIds) {
+      const team = teams.get(id);
+      msg += `• \`${id}\` - ${team?.name} (${team?.agents.size} agents)\n`;
+    }
+    if (teams.size > 5) {
+      msg += `• ... and ${teams.size - 5} more\n`;
+    }
+  } else {
+    msg += `💡 **No persistent teams exist**\n\n`;
+    msg += `Create a team first:\n`;
+    msg += `/team-spawn preset="fast" teamName="myteam" task="..."`;
+  }
+
+  msg += `\n\n💡 Or use the one-shot command:\n`;
+  msg += `/squad task="your task here"`;
+
+  return msg;
+}
+
+// ============================================================================
 // TOOLS
 // ============================================================================
 
-const teamSpawnTool = tool({
-  description: "Spawn a real agent team with actual OpenCode subagents. Teams persist across sessions.",
+const squadTool = tool({
+  description: formatBox(
+    "🚀 /squad - Quick Multi-Agent Analysis",
+    `Run multiple AI agents in parallel with Devil's Advocate review.
+
+**Examples:**
+  /squad task="Is this code secure?"
+  /squad task="Review for bugs" mode="thorough"
+  /squad task="Design a feature" mode="creative"
+
+**Modes:**
+  fast     → 2 agents  (quick questions)
+  thorough  → 3 agents  (detailed analysis)
+  review   → 3 agents  (code + security)
+  creative → 6 agents  (brainstorming)
+
+**Tips:**
+  • Select code before running for context
+  • DA runs second-pass to critique findings
+  • Results cached for 5 minutes`,
+    58
+  ),
   args: {
-    preset: z
-      .string()
-      .optional()
-      .describe("Preset name or comma-separated agent names"),
-    teamName: z.string().describe("Name for the team"),
-    task: z.string().describe("Task description for the team"),
+    task: z.string().describe("Task to perform"),
+    mode: z.enum(["fast", "thorough", "review", "creative"]).optional().default("fast")
+      .describe("Execution mode"),
+    useCache: z.boolean().optional().default(true).describe("Use cache (default: true)"),
+    context: z.string().optional().describe("Additional context (code, files, etc.)"),
+  },
+  execute: async (params) => {
+    const task = params.task as string;
+    const mode = (params.mode as "fast" | "thorough" | "review" | "creative") || "fast";
+    const useCache = params.useCache !== false;
+    const context = params.context as string | undefined;
+
+    // Check cache
+    if (useCache) {
+      const cached = squadCache.get(mode, task, context);
+      if (cached) {
+        return `💾 **Cached Result** (same request within 5 minutes)\n\n${cached}`;
+      }
+    }
+
+    // Select agents based on task
+    let agents: string[];
+    let reason: string;
+
+    if (mode === "creative") {
+      agents = ["planner", "fullstack-developer", "frontend-developer", "backend-developer", "ui-designer", "devil-s-advocate"];
+      reason = "🎨 Creative mode: Planning + Development + Design + DA";
+    } else if (/security|vulnerability|auth|token|encrypt/i.test(task)) {
+      agents = mode === "review"
+        ? ["security-auditor", "code-reviewer", "devil-s-advocate"]
+        : ["security-auditor", "devil-s-advocate"];
+      reason = "🔒 Security task detected";
+    } else if (/bug|error|debug|fix/i.test(task)) {
+      agents = mode === "review"
+        ? ["debugger", "code-reviewer", "devil-s-advocate"]
+        : ["debugger", "devil-s-advocate"];
+      reason = "🐛 Debug task detected";
+    } else if (/implement|develop|create|add|feature/i.test(task)) {
+      agents = mode === "fast"
+        ? ["planner", "devil-s-advocate"]
+        : ["planner", "fullstack-developer", "devil-s-advocate"];
+      reason = "🔨 Implementation task detected";
+    } else if (/plan|design|architecture/i.test(task)) {
+      agents = ["planner", "devil-s-advocate"];
+      reason = "📋 Planning task detected";
+    } else if (/review|check|analyze/i.test(task)) {
+      agents = mode === "fast"
+        ? ["code-reviewer", "devil-s-advocate"]
+        : ["code-reviewer", "security-auditor", "devil-s-advocate"];
+      reason = "👁️ Review task detected";
+    } else {
+      agents = mode === "thorough"
+        ? ["code-reviewer", "security-auditor", "devil-s-advocate"]
+        : ["code-reviewer", "devil-s-advocate"];
+      reason = "🔍 General analysis (review mode)";
+    }
+
+    // Validate agents
+    const { valid, invalid } = validateAgentAvailability(agents);
+
+    if (valid.length === 0) {
+      return getAgentNotFoundSuggestion(agents);
+    }
+
+    // Cost warning
+    const costNote = estimateAgentCost(valid.length);
+
+    // Create ephemeral team
+    const teamId = `squad-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const team: Team = {
+      id: teamId,
+      name: `squad-${mode}`,
+      preset: "custom",
+      agents: new Map(),
+      createdAt: new Date(),
+      lastActivity: new Date(),
+      task,
+    };
+
+    for (const agentName of valid) {
+      const agentDef = opencodeConfig[agentName];
+      team.agents.set(agentName, {
+        name: agentName,
+        sessionID: null,
+        role: extractRoleFromDescription(agentDef?.description, agentName),
+        status: "idle",
+      });
+    }
+
+    teams.set(teamId, team);
+
+    // Build prompt
+    let taskPrompt = task;
+    if (context) {
+      taskPrompt = `${task}\n\n## Context:\n${context}`;
+    }
+    taskPrompt += `\n\n## Output Guide\n- Be concise and focus on key points\n- Provide practical, actionable suggestions`;
+
+    // Separate DA for second-pass
+    const nonDAAgents = valid.filter(n => !isDevilsAdvocate(n));
+    const hasDA = valid.some(n => isDevilsAdvocate(n));
+
+    // Build output header
+    let output = formatBox(
+      `🚀 SQUAD EXECUTION (${mode.toUpperCase()})`,
+      `${reason}\nAgents: ${valid.join(", ")}\n${invalid.length > 0 ? `⚠️ Skipped: ${invalid.join(", ")}` : ""}\n${costNote}`,
+      60
+    );
+
+    // Execute
+    const executeAgentWithRetry = async (agentName: string): Promise<{ name: string; success: boolean; result?: string; error?: string; truncated?: boolean }> => {
+      let retries = 0;
+      let success = false;
+      let result: string | undefined;
+      let error: string | undefined;
+      let sessionID: string | undefined;
+      let wasTruncated = false;
+
+      try {
+        while (!success && retries <= 2) {
+          try {
+            const sessionResult = await spawnAgentSession(agentName, taskPrompt, teamId);
+            if (sessionResult) {
+              sessionID = sessionResult.sessionID;
+              result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
+
+              const { text: truncatedResult, wasTruncated: truncated } = truncateText(result!, MAX_RESULT_LENGTH);
+              result = truncatedResult;
+              wasTruncated = truncated;
+
+              success = true;
+            }
+          } catch (e) {
+            error = e instanceof Error ? e.message : String(e);
+            retries++;
+            if (retries <= 2) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+            }
+          }
+        }
+      } finally {
+        if (sessionID) {
+          try {
+            await cleanupSession(sessionID);
+          } catch (cleanupError) {
+            // Silent cleanup
+          }
+        }
+      }
+
+      return { name: agentName, success, result, error, truncated: wasTruncated };
+    };
+
+    const executionPromises = nonDAAgents.map(name => executeAgentWithRetry(name));
+    const results = await Promise.allSettled(executionPromises);
+
+    const settledResults: ExecutionResult[] = results.map((r) => {
+      if (r.status === "fulfilled") {
+        return r.value;
+      }
+      return {
+        name: r.reason?.name || "unknown",
+        success: false,
+        error: r.reason instanceof Error ? r.reason.message : String(r.reason)
+      };
+    });
+
+    // DA second-pass
+    if (hasDA) {
+      output += `\n📊 **Phase 1**: Initial Analysis\n\n`;
+
+      const daResult = await runDevilsAdvocateSecondPass(teamId, taskPrompt, DEFAULT_TIMEOUT_MS);
+
+      output += `\n🎯 **Phase 2**: Devil's Advocate Review\n\n`;
+
+      if (daResult.success) {
+        const { text: truncatedResult, wasTruncated } = truncateText(daResult.result!, MAX_RESULT_LENGTH);
+        daResult.result = truncatedResult;
+        daResult.truncated = wasTruncated;
+        settledResults.push(daResult);
+      } else {
+        settledResults.push(daResult);
+      }
+    }
+
+    // Format agent results
+    output += formatSection("Agent Results");
+    let truncatedCount = 0;
+    for (const r of settledResults) {
+      if (r.success && r.result) {
+        if (r.truncated) truncatedCount++;
+        output += formatAgentHeader(r.name, "success");
+        output += `${r.result}`;
+        if (r.truncated) {
+          output += `\n\n⚠️ *Output truncated*`;
+        }
+        output += `\n`;
+      } else if (r.error) {
+        output += formatAgentHeader(r.name, "error");
+        output += `${r.error}\n`;
+      }
+    }
+
+    // Summary
+    const successCount = settledResults.filter(r => r.success).length;
+    output += formatSection("Summary");
+    output += `✅ **Success**: ${successCount}/${settledResults.length} agents completed\n`;
+
+    if (truncatedCount > 0) {
+      output += `⚠️ **Warning**: ${truncatedCount} outputs truncated (max ${MAX_RESULT_LENGTH} chars)\n`;
+    }
+
+    if (successCount === settledResults.length) {
+      output += `🎉 All agents completed!\n`;
+    } else if (successCount > 0) {
+      output += `⚠️ Some agents failed - see errors above\n`;
+    } else {
+      output += `❌ All agents failed - please try again\n`;
+    }
+
+    // Cleanup stats
+    if (cleanupStats.failed > 0) {
+      output += `\n[Cleanup: ${cleanupStats.successful}/${cleanupStats.totalAttempts} ok, ${cleanupStats.failed} failed]\n`;
+    }
+
+    // Save to cache
+    if (useCache && successCount > 0) {
+      squadCache.set(mode, task, output, context);
+    }
+
+    // Cleanup
+    teams.delete(teamId);
+
+    return output;
+  },
+});
+
+const teamSpawnTool = tool({
+  description: formatBox(
+    "👥 /team-spawn - Create Persistent Team",
+    `Create a team that persists across sessions.
+
+**Examples:**
+  /team-spawn preset="fast" teamName="reviewers" task="Code review"
+  /team-spawn preset="security,code-reviewer" teamName="audit" task="Security audit"
+
+**Presets:** fast, thorough, review, creative, security, debug, plan
+**Or use custom agents:** preset="agent1,agent2,agent3"
+
+**Features:**
+  • Team saved to disk (~/.opencode/agent-squad-teams.json)
+  • Survives restarts and crashes
+  • Use with /team-execute and /team-discuss`,
+    56
+  ),
+  args: {
+    preset: z.string().describe("Preset name or comma-separated agents"),
+    teamName: z.string().describe("Unique name for the team"),
+    task: z.string().describe("Default task for the team"),
   },
   async execute(args) {
     if (!globalClient) {
-      return "Error: OpenCode client not available";
+      return "❌ Error: OpenCode client not available";
     }
 
-    if (!args.teamName || args.teamName.trim() === "") {
-      return `Error: Team name is required`;
+    if (!args.teamName?.trim()) {
+      return `❌ **Error**: teamName is required\n\n💡 Example: /team-spawn preset="fast" teamName="myteam" task="..."`;
     }
-    if (!args.task || args.task.trim() === "") {
-      return `Error: Task description is required`;
+    if (!args.task?.trim()) {
+      return `❌ **Error**: task is required\n\n💡 Example: /team-spawn preset="fast" teamName="myteam" task="Review this code"`;
     }
 
     const presetValue = args.preset ?? DEFAULT_PRESET;
     const teamId = `team-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
-    const agentNames =
-      PRESETS[presetValue] ??
+    const agentNames = PRESETS[presetValue] ??
       presetValue.split(",").map((s) => s.trim()).filter(Boolean);
 
     if (agentNames.length === 0) {
-      return `Error: No agents specified. Available: ${Object.keys(opencodeConfig).join(", ")}`;
+      return `❌ **Error**: No agents specified\n\n💡 ${getSuggestedAgents("fast")}`;
     }
 
-    // Validate agent availability BEFORE creating team
+    // Validate agents
     const { valid, invalid } = validateAgentAvailability(agentNames);
 
     if (valid.length === 0) {
-      return `Error: No valid agents found. Requested: ${agentNames.join(", ")}. Available: ${Object.keys(opencodeConfig).join(", ")}`;
+      return getAgentNotFoundSuggestion(agentNames);
     }
 
-    const costWarning = estimateAgentCost(valid.length, presetValue);
+    const costNote = estimateAgentCost(valid.length);
 
     const team: Team = {
       id: teamId,
@@ -800,47 +1157,62 @@ const teamSpawnTool = tool({
     enforceMaxTeams();
     savePersistedTeams(teams);
 
-    let response = `## Team "${args.teamName}" Created\n\n`;
-    response += `**Team ID**: ${teamId}\n`;
-    response += `**Preset**: ${presetValue}\n`;
-    response += `**Agents**: ${team.agents.size}\n`;
-    response += `**Persistence**: Team saved to disk, survives restarts\n\n`;
-    response += `### Agents\n`;
+    // Format output
+    let output = formatBox(
+      `👥 Team "${args.teamName}" Created`,
+      `Team ID: \`${teamId}\`\nAgents: ${team.agents.size}\n\n💾 Saved to disk - survives restarts!`,
+      56
+    );
 
+    output += `\n**Agents** (${valid.length}):\n`;
     for (const [name, agent] of team.agents) {
-      response += `- **${name}** (${agent.role}) [OK]\n`;
+      output += `  ✅ ${name} (${agent.role})\n`;
     }
 
     if (invalid.length > 0) {
-      response += `\n⚠️ **Skipped (not in config)**: ${invalid.join(", ")}\n`;
+      output += `\n⚠️ **Skipped** (not configured): ${invalid.join(", ")}\n`;
     }
 
-    if (costWarning) {
-      response += `\n${costWarning}\n`;
+    if (costNote) {
+      output += `\n${costNote}\n`;
     }
 
-    response += `\n### Task\n${args.task}\n`;
-    response += `\n---\n`;
-    response += `Use \`/team-execute teamId="${teamId}"\` to run.\n`;
+    output += `\n**Task**: ${args.task}\n`;
+    output += `\n💡 **Next steps**:\n`;
+    output += `  Run: \`/team-execute teamId="${teamId}"\`\n`;
+    output += `  Discuss: \`/team-discuss teamId="${teamId}" topic="..." round=2\``;
 
-    return response;
+    return output;
   },
 });
 
 const teamExecuteTool = tool({
-  description: "Execute team agents in parallel. DA runs as second-pass to review others' results.",
+  description: formatBox(
+    "⚡ /team-execute - Run Team (DA Second-Pass)",
+    `Execute all agents in parallel.
+
+**Example:**
+  /team-execute teamId="team-xxx"
+
+**Features:**
+  • Parallel execution for speed
+  • Devil's Advocate runs as second-pass
+  • Results saved in team state
+  • Follow up with /team-discuss`,
+    54
+  ),
   args: {
-    teamId: z.string().describe("Team ID to execute"),
-    timeout: z.number().optional().describe("Timeout in seconds per agent"),
+    teamId: z.string().describe("Team ID"),
+    timeout: z.number().optional().describe("Timeout in seconds per agent (default: 90)"),
   },
   async execute(args) {
     if (!globalClient) {
-      return "Error: OpenCode client not available";
+      return "❌ Error: OpenCode client not available";
     }
 
     const team = teams.get(args.teamId);
     if (!team) {
-      return `Error: Team ${args.teamId} not found. Available teams: ${Array.from(teams.keys()).join(", ")}`;
+      return getTeamNotFoundSuggestion(args.teamId);
     }
 
     const timeout = (args.timeout ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
@@ -857,17 +1229,13 @@ const teamExecuteTool = tool({
       }
     }
 
-    let response = `## Executing Team "${team.name}"\n\n`;
-    response += `**Task**: ${team.task}\n`;
-    response += `**Agents**: ${team.agents.size}\n`;
+    let output = formatBox(
+      `⚡ Executing "${team.name}"`,
+      `Task: ${team.task.slice(0, 50)}\nAgents: ${team.agents.size}\n${hasDA ? "Mode: Parallel → DA second-pass" : "Mode: Parallel only"}`,
+      56
+    );
 
-    if (hasDA) {
-      response += `**Mode**: Parallel execution, DA reviews as second-pass\n`;
-    }
-
-    response += `\n`;
-
-    // Phase 1: Execute non-DA agents in parallel
+    // Phase 1: Execute non-DA agents
     const executionPromises = nonDAAgents.map(
       ([name, agent]) => executeAgent(name, agent, team.task, timeout, args.teamId)
     );
@@ -885,13 +1253,13 @@ const teamExecuteTool = tool({
       };
     });
 
-    // Phase 2: Run DA as second-pass if present
+    // Phase 2: DA second-pass
     if (hasDA) {
-      response += `**Phase 1: Initial Analysis**\n\n`;
+      output += `\n📊 **Phase 1**: Initial analysis complete\n\n`;
 
       const daResult = await runDevilsAdvocateSecondPass(args.teamId, team.task, timeout);
 
-      response += `**Phase 2: Devil's Advocate Review**\n\n`;
+      output += `🎯 **Phase 2**: Devil's Advocate review\n\n`;
 
       if (daResult.success) {
         const daAgent = team.agents.get("devil-s-advocate");
@@ -906,20 +1274,34 @@ const teamExecuteTool = tool({
       }
     }
 
-    response += formatExecutionResults(team, settledResults);
-    response += `\n**Team ID**: ${team.id}`;
-    response += `\n**Team persists**: Use \`/team-discuss teamId="${team.id}"\` to continue discussion.`;
+    // Format results
+    output += formatExecutionResults(team, settledResults);
 
-    // Update team activity and persist
+    // Update and persist
     team.lastActivity = new Date();
     savePersistedTeams(teams);
 
-    return response;
+    output += `\n💾 **Team saved** - ID: \`${team.id}\`\n`;
+    output += `💡 Continue: \`/team-discuss teamId="${team.id}" topic="..." round=2\``;
+
+    return output;
   },
 });
 
 const teamDiscussTool = tool({
-  description: "Run a discussion between team agents with context sharing. Team state persists.",
+  description: formatBox(
+    "💬 /team-discuss - Multi-Round Discussion",
+    `Agents discuss sequentially, seeing each other's results.
+
+**Example:**
+  /team-discuss teamId="team-xxx" topic="Best approach?" round=2
+
+**Features:**
+  • Sequential rounds with context sharing
+  • Each agent sees previous results
+  • Team state saved after discussion`,
+    52
+  ),
   args: {
     teamId: z.string().describe("Team ID"),
     topic: z.string().describe("Discussion topic"),
@@ -927,37 +1309,38 @@ const teamDiscussTool = tool({
   },
   async execute(args) {
     if (!globalClient) {
-      return "Error: OpenCode client not available";
+      return "❌ Error: OpenCode client not available";
     }
 
-    if (!args.teamId || args.teamId.trim() === "") {
-      return `Error: Team ID is required`;
+    if (!args.teamId?.trim()) {
+      return `❌ **Error**: teamId is required\n\n💡 Get team ID from /team-spawn output`;
     }
-    if (!args.topic || args.topic.trim() === "") {
-      return `Error: Discussion topic is required`;
+    if (!args.topic?.trim()) {
+      return `❌ **Error**: topic is required\n\n💡 Example: /team-discuss teamId="..." topic="What's the best approach?"`;
     }
 
     const team = teams.get(args.teamId);
     if (!team) {
-      return `Error: Team ${args.teamId} not found. Available teams: ${Array.from(teams.keys()).join(", ")}`;
+      return getTeamNotFoundSuggestion(args.teamId);
     }
 
     const rounds = Math.min(Math.max(args.rounds ?? 2, 1), 3);
 
-    let response = `## Discussion: ${args.topic.slice(0, 100)}\n\n`;
-    response += `**Team**: ${team.name}\n`;
-    response += `**Rounds**: ${rounds}\n`;
-    response += `**Team ID**: ${team.id}\n\n`;
+    let output = formatBox(
+      `💬 Discussion: ${args.topic.slice(0, 40)}...`,
+      `Team: ${team.name}\nRounds: ${rounds}\nAgents: ${team.agents.size}`,
+      50
+    );
 
     for (let r = 1; r <= rounds; r++) {
-      response += `### Round ${r}\n\n`;
+      output += `\n${"─".repeat(40)} **Round ${r}** ${"─".repeat(40)}\n\n`;
 
       for (const [name, agent] of team.agents) {
         const agentContext = formatAgentContext(args.teamId, name);
 
         const prompt = r === 1
           ? `${args.topic}\n\nYou are ${name}. Please analyze.`
-          : `${args.topic}\n\n## Other Agents' Opinions:\n${agentContext}\n\n## Additional Analysis:\nAs ${name}, provide new perspectives or counterarguments. Find what other agents missed.`;
+          : `${args.topic}\n\n## Other Agents' Opinions:\n${agentContext}\n\n## Additional Analysis:\nAs ${name}, provide new perspectives or counterarguments.`;
 
         let sessionID: string | undefined;
 
@@ -965,7 +1348,6 @@ const teamDiscussTool = tool({
           agent.status = "thinking";
           const sessionResult = await spawnAgentSession(name, prompt, args.teamId);
           sessionID = sessionResult.sessionID;
-          agent.sessionID = sessionID;
           agent.status = "responding";
 
           const result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
@@ -975,310 +1357,37 @@ const teamDiscussTool = tool({
           agent.result = truncatedResult;
           agent.resultTruncated = wasTruncated;
 
-          response += `**${name}**:\n`;
-          response += truncatedResult;
+          output += `**${name}**:\n`;
+          output += truncatedResult;
           if (wasTruncated) {
-            response += ` \n\n[...truncated...]`;
+            output += ` \n\n[...truncated...]`;
           }
-          response += `\n\n`;
+          output += `\n\n`;
         } catch (error) {
           agent.status = "error";
           agent.error = error instanceof Error ? error.message : String(error);
 
-          response += `**${name}**: [FAIL] Error - ${agent.error}\n\n`;
+          output += `**${name}**: ❌ ${agent.error}\n\n`;
         } finally {
-          // Cleanup session after discussion (in both success and error paths)
           if (sessionID) {
             try {
               await cleanupSession(sessionID);
             } catch (cleanupError) {
-              const errorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-              console.warn(`[agent-squad] Failed to cleanup session ${sessionID}: ${errorMessage}`);
+              // Silent
             }
-            // Clear sessionID to prevent double-cleanup
             agent.sessionID = null;
           }
         }
       }
     }
 
-    // Update team activity and persist
+    // Update and persist
     team.lastActivity = new Date();
     savePersistedTeams(teams);
 
-    response += `---\n`;
-    response += `**Team ID**: ${team.id}\n`;
-    response += `**Team persists**: All results saved. Use \`/team-execute teamId="${team.id}"\` to run again.`;
-
-    return response;
-  },
-});
-
-// ============================================================================
-// V2: SIMPLIFIED ALL-IN-ONE TOOL
-// ============================================================================
-
-const squadTool = tool({
-  description: `[V2 Improved] Create and execute a team in one command.
-
-**Improvements from DA feedback:**
-- Proper LRU cache with TTL (not O(n) scan)
-- Agent availability validation before execution
-- Devil's Advocate runs as second-pass (reviews others' results)
-- Cost warnings for large teams
-- Truncation warnings (not silent)
-- Team persistence (survives restarts)
-- Session cleanup tracking
-
-**Examples:**
-- /squad task="Analyze security vulnerabilities in this code"
-- /squad task="Help me fix this bug" mode="fast"
-- /squad task="Plan new feature implementation" mode="thorough"
-- /squad task="Brainstorm innovative ideas" mode="creative"
-
-**Modes:**
-- fast (default): 2 agents, quick response
-- thorough: 3 agents, deep analysis
-- review: 3+security, comprehensive code review
-- creative: 5+DA, creative development team`,
-  args: {
-    task: z.string().describe("Task to perform"),
-    mode: z.enum(["fast", "thorough", "review", "creative"]).optional().default("fast")
-      .describe("fast: 2 agents, thorough: 3 agents, review: 3+security, creative: 5+DA"),
-    useCache: z.boolean().optional().default(true).describe("Use cache (default: true)"),
-    context: z.string().optional().describe("Additional context (code, files, etc.)"),
-  },
-  execute: async (params) => {
-    const task = params.task as string;
-    const mode = (params.mode as "fast" | "thorough" | "review" | "creative") || "fast";
-    const useCache = params.useCache !== false;
-    const context = params.context as string | undefined;
-
-    // Check cache with context included
-    if (useCache) {
-      const cached = squadCache.get(mode, task, context);
-      if (cached) {
-        return `[Cached result - same request within 5 minutes]\n\n${cached}`;
-      }
-    }
-
-    // Analyze task and select optimal agents
-    let agents: string[];
-    let reason: string;
-
-    if (mode === "creative") {
-      agents = [
-        "planner",
-        "fullstack-developer",
-        "frontend-developer",
-        "backend-developer",
-        "ui-designer",
-        "devil-s-advocate",
-      ];
-      reason = "Creative mode: 6-agent large team (plan+dev+design+DA)";
-    } else if (/security|vulnerability|auth|token|encrypt/i.test(task)) {
-      agents = mode === "review"
-        ? ["security-auditor", "code-reviewer", "devil-s-advocate"]
-        : ["security-auditor", "devil-s-advocate"];
-      reason = "Security task detected";
-    } else if (/bug|error|debug|fix/i.test(task)) {
-      agents = mode === "review"
-        ? ["debugger", "code-reviewer", "devil-s-advocate"]
-        : ["debugger", "devil-s-advocate"];
-      reason = "Debug task detected";
-    } else if (/implement|develop|create|add|feature/i.test(task)) {
-      agents = mode === "fast"
-        ? ["planner", "devil-s-advocate"]
-        : ["planner", "fullstack-developer", "devil-s-advocate"];
-      reason = "Implementation task detected";
-    } else if (/plan|design|architecture/i.test(task)) {
-      agents = ["planner", "devil-s-advocate"];
-      reason = "Planning task detected";
-    } else if (/review|check|analyze/i.test(task)) {
-      agents = mode === "fast"
-        ? ["code-reviewer", "devil-s-advocate"]
-        : ["code-reviewer", "security-auditor", "devil-s-advocate"];
-      reason = "Review task detected";
-    } else {
-      agents = mode === "thorough"
-        ? ["code-reviewer", "security-auditor", "devil-s-advocate"]
-        : ["code-reviewer", "devil-s-advocate"];
-      reason = "General task (default review mode)";
-    }
-
-    // Validate agent availability
-    const { valid, invalid } = validateAgentAvailability(agents);
-
-    if (valid.length === 0) {
-      return `Error: No valid agents found. Requested: ${agents.join(", ")}. Available: ${Object.keys(opencodeConfig).join(", ")}`;
-    }
-
-    // Cost warning
-    const costWarning = estimateAgentCost(valid.length, mode);
-
-    // Create ephemeral team (doesn't persist, but follows same structure)
-    const teamId = `squad-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const team: Team = {
-      id: teamId,
-      name: `squad-${mode}`,
-      preset: "custom",
-      agents: new Map(),
-      createdAt: new Date(),
-      lastActivity: new Date(),
-      task,
-    };
-
-    // Add valid agents
-    for (const agentName of valid) {
-      const agentDef = opencodeConfig[agentName];
-      team.agents.set(agentName, {
-        name: agentName,
-        sessionID: null,
-        role: extractRoleFromDescription(agentDef?.description, agentName),
-        status: "idle",
-      });
-    }
-
-    teams.set(teamId, team);
-
-    // Build prompt with context
-    let taskPrompt = task;
-    if (context) {
-      taskPrompt = `${task}\n\n## Context:\n${context}`;
-    }
-    taskPrompt += `\n\n## Output Guide\n- Be concise and focus on key points\n- Provide practical, actionable suggestions`;
-
-    // Separate DA from other agents for second-pass execution
-    const nonDAAgents = valid.filter(n => !isDevilsAdvocate(n));
-    const hasDA = valid.some(n => isDevilsAdvocate(n));
-
-    // Phase 1: Execute non-DA agents in parallel
-    const executeAgentWithRetry = async (agentName: string): Promise<{ name: string; success: boolean; result?: string; error?: string; truncated?: boolean }> => {
-      let retries = 0;
-      let success = false;
-      let result: string | undefined;
-      let error: string | undefined;
-      let sessionID: string | undefined;
-      let wasTruncated = false;
-
-      try {
-        while (!success && retries <= 2) {
-          try {
-            const sessionResult = await spawnAgentSession(agentName, taskPrompt, teamId);
-            if (sessionResult) {
-              sessionID = sessionResult.sessionID;
-              result = await waitForSessionCompletion(sessionID, DEFAULT_TIMEOUT_MS);
-
-              const { text: truncatedResult, wasTruncated: truncated } = truncateText(result, MAX_RESULT_LENGTH);
-              result = truncatedResult;
-              wasTruncated = truncated;
-
-              success = true;
-            }
-          } catch (e) {
-            error = e instanceof Error ? e.message : String(e);
-            retries++;
-            if (retries <= 2) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-            }
-          }
-        }
-      } finally {
-        if (sessionID) {
-          try {
-            await cleanupSession(sessionID);
-          } catch (cleanupError) {
-            const errorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-            console.warn(`[agent-squad] Failed to cleanup session ${sessionID}: ${errorMessage}`);
-          }
-        }
-      }
-
-      return { name: agentName, success, result, error, truncated: wasTruncated };
-    };
-
-    const executionPromises = nonDAAgents.map(name => executeAgentWithRetry(name));
-    const results = await Promise.allSettled(executionPromises);
-
-    const settledResults: ExecutionResult[] = results.map((r) => {
-      if (r.status === "fulfilled") {
-        return r.value;
-      }
-      return {
-        name: r.reason?.name || "unknown",
-        success: false,
-        error: r.reason instanceof Error ? r.reason.message : String(r.reason)
-      };
-    });
-
-    // Phase 2: Run DA as second-pass if present
-    if (hasDA) {
-      const daResult = await runDevilsAdvocateSecondPass(teamId, taskPrompt, DEFAULT_TIMEOUT_MS);
-      if (daResult.success) {
-        const { text: truncatedResult, wasTruncated } = truncateText(daResult.result!, MAX_RESULT_LENGTH);
-        daResult.result = truncatedResult;
-        daResult.truncated = wasTruncated;
-        settledResults.push(daResult);
-      }
-    }
-
-    // Format results
-    let output = `**Squad Execution Complete** (${mode} mode)\n`;
-    output += `${reason}\n`;
-
-    if (invalid.length > 0) {
-      output += `⚠️ Skipped unavailable agents: ${invalid.join(", ")}\n`;
-    }
-
-    output += `Agents: ${valid.join(", ")}\n\n`;
-    output += `---\n\n`;
-
-    let truncatedCount = 0;
-    for (const r of settledResults) {
-      if (r.success && r.result) {
-        if (r.truncated) truncatedCount++;
-
-        output += `### ${r.name}\n\n`;
-        output += r.result;
-        if (r.truncated) {
-          output += `\n\n⚠️ *Result was truncated to ${MAX_RESULT_LENGTH} characters*`;
-        }
-        output += `\n\n`;
-      } else if (r.error) {
-        output += `### ${r.name}\n\n`;
-        output += `**Error**: ${r.error}\n\n`;
-      }
-    }
-
-    // Summary
-    const successCount = settledResults.filter(r => r.success).length;
-    output += `---\n`;
-    output += `**Result**: ${successCount}/${settledResults.length} agents succeeded\n`;
-
-    if (truncatedCount > 0) {
-      output += `⚠️ ${truncatedCount} results were truncated due to length limits.\n`;
-    }
-
-    if (successCount === settledResults.length) {
-      output += `All agents completed successfully.\n`;
-    } else if (successCount > 0) {
-      output += `Some agents failed. Please review the results.\n`;
-    } else {
-      output += `All agents failed. Please try again.\n`;
-    }
-
-    // Cleanup stats
-    if (cleanupStats.failed > 0) {
-      output += `\n[Cleanup: ${cleanupStats.successful}/${cleanupStats.totalAttempts} successful, ${cleanupStats.failed} failed]\n`;
-    }
-
-    // Save to cache
-    if (useCache && successCount > 0) {
-      squadCache.set(mode, task, output, context);
-    }
-
-    // Cleanup ephemeral team
-    teams.delete(teamId);
+    output += `${"─".repeat(40)}\n`;
+    output += `💾 **Team saved** - ID: \`${team.id}\`\n`;
+    output += `💡 Re-run: \`/team-execute teamId="${team.id}"\``;
 
     return output;
   },
@@ -1292,7 +1401,6 @@ export default async function plugin(input: PluginInput): Promise<Hooks> {
   globalClient = input.client;
   opencodeConfig = loadOpenCodeAgents();
 
-  // Reload persisted teams
   const persistedTeams = loadPersistedTeams();
   for (const [id, team] of persistedTeams) {
     teams.set(id, team);
@@ -1300,7 +1408,6 @@ export default async function plugin(input: PluginInput): Promise<Hooks> {
 
   return {
     tool: {
-      // Core Tools Only (4)
       "squad": squadTool,
       "team-spawn": teamSpawnTool,
       "team-execute": teamExecuteTool,

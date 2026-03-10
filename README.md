@@ -1,6 +1,6 @@
 # @opencode-ai/agent-squad
 
-[![npm version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://www.npmjs.com/package/@opencode-ai/agent-squad)
+[![npm version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://www.npmjs.com/package/@opencode-ai/agent-squad)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![opencode](https://img.shields.io/badge/OpenCode-%3E%3D1.1.60-purple.svg)](https://opencode.ai)
 
@@ -412,6 +412,14 @@ opencode config get plugin
 cd ~/.config/opencode/plugins/opencode-agent-squad
 bun run build
 ```
+
+## What's New in v2.2
+
+- **🎨 Beautiful Output**: Box formatting, icons, clear sections
+- **💡 Helpful Errors**: Spelling suggestions, available agents list, next steps
+- **📊 Better Progress**: Phase indicators (Phase 1/2), status icons
+- **🔧 Improved UX**: Tool descriptions with examples, cost estimates
+- **📝 Clear Guidance**: Actionable hints, mode explanations
 
 ## What's New in v2.1
 

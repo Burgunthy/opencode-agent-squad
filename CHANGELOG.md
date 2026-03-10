@@ -2,6 +2,49 @@
 
 All notable changes to @opencode-ai/agent-squad will be documented in this file.
 
+## [2.2.0] - 2026-03-11
+
+### UX Improvements
+
+**Beautiful Output Formatting**
+- Box drawing characters for visual hierarchy
+- Agent status icons (✅ success, ❌ error, ⚠️ warning)
+- Section separators with clear headers
+- Progress indicators (Phase 1/2, Summary)
+
+**Better Error Messages**
+- Agent not found? See available agents with spelling suggestions
+- Team not found? List existing teams with create command
+- Missing field? Show example with correct syntax
+- Actionable hints for common errors
+
+**Improved Tool Descriptions**
+- Visual box formatting with examples
+- Quick reference tips included
+- Mode comparison table visible in tool description
+- Preset hints for common workflows
+
+**Better User Guidance**
+- Cost estimates for large teams (4+ agents)
+- Next step suggestions after each command
+- Skipped agents clearly marked with reasons
+- Truncation warnings with character limits
+
+**Output Quality**
+- Summary section with clear success/failure indicators
+- Emoji-based visual scanning (🚀👥⚡💬🎯📊💾)
+- Structured sections: Results → Summary → Next Steps
+- Cleanup stats only shown when there are failures
+
+### Polish
+
+- Removed unnecessary visual clutter
+- Consistent emoji usage across tools
+- Better spacing and readability
+- Helpful hints in error messages
+
+## [2.1.0] - 2026-03-11
+
 ## [2.1.0] - 2026-03-11
 
 ### Critical Fixes Based on Devil's Advocate Review

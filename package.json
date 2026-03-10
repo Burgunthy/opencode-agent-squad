@@ -1,7 +1,7 @@
 {
   "name": "@opencode-ai/agent-squad",
-  "version": "2.1.0",
-  "description": "Multi-agent orchestration with real team persistence, LRU cache, and second-pass Devil's Advocate",
+  "version": "2.2.0",
+  "description": "Multi-agent orchestration with beautiful output and helpful error messages",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
