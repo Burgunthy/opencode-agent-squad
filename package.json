@@ -1,7 +1,7 @@
 {
   "name": "@opencode-ai/agent-squad",
-  "version": "1.0.0",
-  "description": "Multi-agent team collaboration plugin for OpenCode",
+  "version": "2.1.0",
+  "description": "Multi-agent orchestration with real team persistence, LRU cache, and second-pass Devil's Advocate",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,3 +1,2 @@
-import { type Plugin } from "@opencode-ai/plugin";
-declare const plugin: Plugin;
-export default plugin;
+import { type PluginInput, type Hooks } from "@opencode-ai/plugin";
+export default function plugin(input: PluginInput): Promise<Hooks>;
